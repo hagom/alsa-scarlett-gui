@@ -34,6 +34,11 @@ struct drop_down_value_ops {
   // afterwards. May be NULL if the model is static and value_to_row
   // never returns -1. Called before every refresh.
   void (*refresh_model)(GtkStringList *model, int value, void *user_data);
+
+  // Return whether the control is currently applicable (combined with
+  // element writability to set button sensitivity). May be NULL if the
+  // control is always applicable.
+  int (*sensitive)(int value, void *user_data);
 };
 
 // Build a drop-down that decouples the ALSA element value from the row

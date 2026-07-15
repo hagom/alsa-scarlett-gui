@@ -171,17 +171,38 @@ static void bind_factory(
   gtk_widget_set_opacity(icon, index == data->ticked_row ? 1.0 : 0.0);
 }
 
+// clear the cached icon pointer when a row's widgets are unbound
+// (e.g. refresh_model removed the row), so update_icons doesn't touch
+// destroyed widgets
+static void unbind_factory(
+  GtkListItemFactory *factory,
+  GtkListItem        *list_item,
+  gpointer            user_data
+) {
+  struct drop_down *data = user_data;
+
+  GtkWidget *box = gtk_list_item_get_child(list_item);
+  GtkWidget *icon = gtk_widget_get_last_child(box);
+
+  for (int i = 0; i < data->icon_count; i++)
+    if (data->icons[i] == icon)
+      data->icons[i] = NULL;
+}
+
 static void drop_down_updated(
   struct alsa_elem *elem,
   void             *private
 ) {
   struct drop_down *data = private;
 
-  int is_writable = alsa_get_elem_writable(elem);
-  gtk_widget_set_sensitive(data->button, is_writable);
-
   int value = alsa_get_elem_value(elem);
   data->current_value = value;
+
+  int is_sensitive = alsa_get_elem_writable(elem);
+  if (is_value_mapped(data) && data->ops->sensitive)
+    is_sensitive = is_sensitive &&
+      data->ops->sensitive(value, data->user_data);
+  gtk_widget_set_sensitive(data->button, is_sensitive);
 
   if (is_value_mapped(data)) {
     if (data->ops->refresh_model)
@@ -252,6 +273,7 @@ static void build_drop_down(struct drop_down *data, const char *label_text) {
   GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
   g_signal_connect(factory, "setup", G_CALLBACK(setup_factory), data);
   g_signal_connect(factory, "bind", G_CALLBACK(bind_factory), data);
+  g_signal_connect(factory, "unbind", G_CALLBACK(unbind_factory), data);
 
   data->selection = gtk_single_selection_new(G_LIST_MODEL(data->model));
   data->listview = gtk_list_view_new(
