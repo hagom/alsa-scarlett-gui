@@ -13,12 +13,15 @@
 //   between ALSA values and row indices.
 struct drop_down {
   struct alsa_elem   *elem;
+  GtkWidget          *widget;
   GtkWidget          *button;
+  GtkWidget          *arrow;
   GtkWidget          *popover;
   GtkWidget          *listview;
   GtkStringList      *model;
   GtkSingleSelection *selection;
   int                 fixed_text;
+  int                 cycle;
 
   // Latest ALSA value seen by drop_down_updated. Read by
   // list_item_activated to skip redundant writes when the user picks a
@@ -105,11 +108,8 @@ static void list_item_activated(
   gtk_popover_popdown(GTK_POPOVER(data->popover));
 }
 
-static void toggle_button_clicked(GtkWidget *widget, gpointer user_data) {
-  struct drop_down *data = user_data;
-
+static void popup_list(struct drop_down *data) {
   gtk_popover_popup(GTK_POPOVER(data->popover));
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(data->button), FALSE);
 
   // Land focus on the currently-ticked row so Enter accepts the
   // current value and arrow keys adjust from there.
@@ -125,6 +125,53 @@ static void toggle_button_clicked(GtkWidget *widget, gpointer user_data) {
 #else
     gtk_list_view_focus_row(data->listview, data->ticked_row);
 #endif
+  }
+}
+
+static void toggle_button_clicked(GtkWidget *widget, gpointer user_data) {
+  struct drop_down *data = user_data;
+
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(data->button), FALSE);
+  popup_list(data);
+}
+
+static void arrow_clicked(GtkWidget *widget, gpointer user_data) {
+  popup_list(user_data);
+}
+
+static int row_enabled(struct drop_down *data, int row) {
+  if (!data->ops->row_enabled)
+    return 1;
+
+  return data->ops->row_enabled(row, data->user_data);
+}
+
+// Advance to the next enabled row, wrapping around, and write its
+// value. Does nothing if no other row is enabled.
+static void cycle_button_clicked(GtkWidget *widget, gpointer user_data) {
+  struct drop_down *data = user_data;
+
+  int n = (int)g_list_model_get_n_items(G_LIST_MODEL(data->model));
+  if (n < 2)
+    return;
+
+  int row = data->ops->value_to_row(data->current_value, data->user_data);
+  if (row < 0)
+    row = 0;
+
+  for (int i = 1; i < n; i++) {
+    int next = (row + i) % n;
+
+    if (!row_enabled(data, next))
+      continue;
+
+    int value = data->ops->row_to_value(
+      next, data->current_value, data->user_data
+    );
+
+    if (value != data->current_value)
+      alsa_set_elem_value(data->elem, value);
+    return;
   }
 }
 
@@ -202,7 +249,7 @@ static void drop_down_updated(
   if (is_value_mapped(data) && data->ops->sensitive)
     is_sensitive = is_sensitive &&
       data->ops->sensitive(value, data->user_data);
-  gtk_widget_set_sensitive(data->button, is_sensitive);
+  gtk_widget_set_sensitive(data->widget, is_sensitive);
 
   if (is_value_mapped(data)) {
     if (data->ops->refresh_model)
@@ -222,6 +269,10 @@ static void drop_down_updated(
 
     char *label = data->ops->button_label(value, data->user_data);
     gtk_button_set_label(GTK_BUTTON(data->button), label);
+    if (data->cycle) {
+      gtk_widget_remove_css_classes_by_prefix(data->button, "selected-");
+      add_class(data->button, label);
+    }
     g_free(label);
   } else {
     data->ticked_row = value;
@@ -256,18 +307,31 @@ static void drop_down_destroy(GtkWidget *widget, gpointer user_data) {
 // dropdown variants. The caller has already populated data->elem,
 // data->model, data->fixed_text, and any value-mapped fields.
 static void build_drop_down(struct drop_down *data, const char *label_text) {
-  data->button = gtk_toggle_button_new_with_label(label_text);
+  if (data->cycle) {
+    data->button = gtk_button_new_with_label(label_text);
+    gtk_widget_set_hexpand(data->button, TRUE);
+
+    data->arrow = gtk_button_new_from_icon_name("pan-down-symbolic");
+    gtk_widget_add_css_class(data->arrow, "cycle-drop-down-arrow");
+
+    data->widget = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(data->widget, "cycle-drop-down");
+    gtk_box_append(GTK_BOX(data->widget), data->button);
+    gtk_box_append(GTK_BOX(data->widget), data->arrow);
+  } else {
+    data->button = gtk_toggle_button_new_with_label(label_text);
+    data->widget = data->button;
+  }
   gtk_widget_add_css_class(data->button, "drop-down");
 
   data->popover = gtk_popover_new();
   gtk_popover_set_has_arrow(GTK_POPOVER(data->popover), FALSE);
-  gtk_widget_set_parent(
-    data->popover,
-    gtk_widget_get_first_child(data->button)
+  GtkWidget *popover_parent = gtk_widget_get_first_child(
+    data->cycle ? data->arrow : data->button
   );
+  gtk_widget_set_parent(data->popover, popover_parent);
   g_signal_connect(
-    gtk_widget_get_first_child(data->button),
-    "destroy", G_CALLBACK(drop_down_destroy), data
+    popover_parent, "destroy", G_CALLBACK(drop_down_destroy), data
   );
 
   GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
@@ -284,9 +348,18 @@ static void build_drop_down(struct drop_down *data, const char *label_text) {
 
   gtk_popover_set_child(GTK_POPOVER(data->popover), data->listview);
 
-  g_signal_connect(
-    data->button, "clicked", G_CALLBACK(toggle_button_clicked), data
-  );
+  if (data->cycle) {
+    g_signal_connect(
+      data->button, "clicked", G_CALLBACK(cycle_button_clicked), data
+    );
+    g_signal_connect(
+      data->arrow, "clicked", G_CALLBACK(arrow_clicked), data
+    );
+  } else {
+    g_signal_connect(
+      data->button, "clicked", G_CALLBACK(toggle_button_clicked), data
+    );
+  }
   g_signal_connect(
     data->listview, "activate", G_CALLBACK(list_item_activated), data
   );
@@ -314,7 +387,33 @@ GtkWidget *make_drop_down_alsa_elem(
 
   build_drop_down(data, label_text);
 
-  return data->button;
+  return data->widget;
+}
+
+static GtkWidget *make_value_mapped_drop_down(
+  struct alsa_elem                 *elem,
+  GtkStringList                    *model,
+  const struct drop_down_value_ops *ops,
+  void                             *user_data,
+  GDestroyNotify                    user_data_free,
+  int                               cycle
+) {
+  struct drop_down *data = g_malloc0(sizeof(struct drop_down));
+  data->elem = elem;
+  data->ticked_row = -1;
+  data->model = model;
+  data->ops = ops;
+  data->user_data = user_data;
+  data->user_data_free = user_data_free;
+  data->cycle = cycle;
+
+  int n = (int)g_list_model_get_n_items(G_LIST_MODEL(model));
+  data->icons = g_malloc0(n * sizeof(GtkWidget *));
+  data->icon_count = n;
+
+  build_drop_down(data, "");
+
+  return data->widget;
 }
 
 GtkWidget *make_value_mapped_drop_down_alsa_elem(
@@ -324,19 +423,19 @@ GtkWidget *make_value_mapped_drop_down_alsa_elem(
   void                             *user_data,
   GDestroyNotify                    user_data_free
 ) {
-  struct drop_down *data = g_malloc0(sizeof(struct drop_down));
-  data->elem = elem;
-  data->ticked_row = -1;
-  data->model = model;
-  data->ops = ops;
-  data->user_data = user_data;
-  data->user_data_free = user_data_free;
+  return make_value_mapped_drop_down(
+    elem, model, ops, user_data, user_data_free, 0
+  );
+}
 
-  int n = (int)g_list_model_get_n_items(G_LIST_MODEL(model));
-  data->icons = g_malloc0(n * sizeof(GtkWidget *));
-  data->icon_count = n;
-
-  build_drop_down(data, "");
-
-  return data->button;
+GtkWidget *make_cycle_drop_down_alsa_elem(
+  struct alsa_elem                 *elem,
+  GtkStringList                    *model,
+  const struct drop_down_value_ops *ops,
+  void                             *user_data,
+  GDestroyNotify                    user_data_free
+) {
+  return make_value_mapped_drop_down(
+    elem, model, ops, user_data, user_data_free, 1
+  );
 }

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
+// SPDX-FileCopyrightText: 2022-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <sys/inotify.h>
@@ -999,29 +999,27 @@ static void get_routing_snks(struct alsa_card *card) {
     if (elem->port_category == PC_HW && elem->hw_type == HW_TYPE_ANALOGUE) {
       char ctrl_name[64];
 
-      snprintf(ctrl_name, sizeof(ctrl_name),
-               "Main Group Output %d Playback Switch", elem->lr_num);
-      r->main_group_switch = get_elem_by_name(card->elems, ctrl_name);
+      for (int g = 0; g < card->monitor_group_count; g++) {
+        const char *group_name = card->monitor_group_names[g];
 
-      snprintf(ctrl_name, sizeof(ctrl_name),
-               "Alt Group Output %d Playback Switch", elem->lr_num);
-      r->alt_group_switch = get_elem_by_name(card->elems, ctrl_name);
+        snprintf(ctrl_name, sizeof(ctrl_name),
+                 "%s Group Output %d Playback Switch",
+                 group_name, elem->lr_num);
+        r->monitor_groups[g].enable =
+          get_elem_by_name(card->elems, ctrl_name);
 
-      snprintf(ctrl_name, sizeof(ctrl_name),
-               "Main Group Output %d Source Playback Enum", elem->lr_num);
-      r->main_group_source = get_elem_by_name(card->elems, ctrl_name);
+        snprintf(ctrl_name, sizeof(ctrl_name),
+                 "%s Group Output %d Source Playback Enum",
+                 group_name, elem->lr_num);
+        r->monitor_groups[g].source =
+          get_elem_by_name(card->elems, ctrl_name);
 
-      snprintf(ctrl_name, sizeof(ctrl_name),
-               "Alt Group Output %d Source Playback Enum", elem->lr_num);
-      r->alt_group_source = get_elem_by_name(card->elems, ctrl_name);
-
-      snprintf(ctrl_name, sizeof(ctrl_name),
-               "Main Group Output %d Trim Playback Volume", elem->lr_num);
-      r->main_group_trim = get_elem_by_name(card->elems, ctrl_name);
-
-      snprintf(ctrl_name, sizeof(ctrl_name),
-               "Alt Group Output %d Trim Playback Volume", elem->lr_num);
-      r->alt_group_trim = get_elem_by_name(card->elems, ctrl_name);
+        snprintf(ctrl_name, sizeof(ctrl_name),
+                 "%s Group Output %d Trim Playback Volume",
+                 group_name, elem->lr_num);
+        r->monitor_groups[g].trim =
+          get_elem_by_name(card->elems, ctrl_name);
+      }
 
       // Initialize effective_source_idx to normal routing value
       r->effective_source_idx = alsa_get_elem_value(elem);
@@ -1050,6 +1048,99 @@ static void get_routing_snks(struct alsa_card *card) {
 
   assert(j == count);
   assert(card->routing_out_count[PC_MIX] <= MAX_MUX_IN);
+}
+
+// Detect the device's monitor groups by probing the group switch
+// control names ("Alt" on two-group devices, "Alt 1"/"Alt 2" on
+// three-group devices)
+static void get_monitor_groups(struct alsa_card *card) {
+  static const char *candidates[] = { "Main", "Alt", "Alt 1", "Alt 2" };
+
+  card->monitor_group_count = 0;
+  for (int i = 0;
+       i < (int)G_N_ELEMENTS(candidates) &&
+         card->monitor_group_count < MAX_MONITOR_GROUPS;
+       i++) {
+    char name[64];
+
+    snprintf(
+      name, sizeof(name),
+      "%s Group Output 1 Playback Switch", candidates[i]
+    );
+    if (get_elem_by_name(card->elems, name))
+      card->monitor_group_names[card->monitor_group_count++] =
+        candidates[i];
+  }
+
+  card->monitor_group_select_elem = get_elem_by_name(
+    card->elems, "Monitor Group Playback Enum"
+  );
+  if (!card->monitor_group_select_elem)
+    card->monitor_group_select_elem = get_elem_by_name(
+      card->elems, "Speaker Switching Alt Playback Switch"
+    );
+}
+
+// Whether the sink is enabled in the given monitor group
+int snk_in_monitor_group(struct routing_snk *r_snk, int group) {
+  struct alsa_elem *enable = r_snk->monitor_groups[group].enable;
+
+  return enable && alsa_get_elem_value(enable);
+}
+
+// Whether the sink is enabled in any monitor group
+int snk_in_any_monitor_group(struct routing_snk *r_snk) {
+  struct alsa_card *card = r_snk->elem->card;
+
+  for (int g = 0; g < card->monitor_group_count; g++)
+    if (snk_in_monitor_group(r_snk, g))
+      return 1;
+  return 0;
+}
+
+// Check if any output is enabled in the given monitor group
+int monitor_group_has_outputs(struct alsa_card *card, int group) {
+  for (int i = 0; i < card->routing_snks->len; i++) {
+    struct routing_snk *snk = &g_array_index(
+      card->routing_snks, struct routing_snk, i
+    );
+
+    if (snk_in_monitor_group(snk, group))
+      return 1;
+  }
+  return 0;
+}
+
+// Which monitor group is active: -1 if the device has no monitor
+// groups or no group has any output enabled, otherwise a group index.
+// Falls back to the first group with enabled outputs when the
+// selected group is empty.
+int get_active_monitor_group(struct alsa_card *card) {
+  if (!card->monitor_group_count)
+    return -1;
+
+  int selected = card->monitor_group_select_elem
+    ? alsa_get_elem_value(card->monitor_group_select_elem)
+    : 0;
+
+  // A dedicated enum selector is authoritative: the selected group is
+  // active even when it has no outputs (everything else is muted).
+  // The gen 4 bool Alt switch instead falls back to a non-empty group.
+  if (card->monitor_group_select_elem &&
+      card->monitor_group_select_elem->type == SND_CTL_ELEM_TYPE_ENUMERATED)
+    return selected >= 0 && selected < card->monitor_group_count
+      ? selected
+      : -1;
+
+  if (selected >= 0 && selected < card->monitor_group_count &&
+      monitor_group_has_outputs(card, selected))
+    return selected;
+
+  for (int g = 0; g < card->monitor_group_count; g++)
+    if (monitor_group_has_outputs(card, g))
+      return g;
+
+  return -1;
 }
 
 // Build lookup table mapping monitor group source enum values to routing
@@ -1111,6 +1202,7 @@ void alsa_get_routing_controls(struct alsa_card *card) {
   }
 
   get_routing_srcs(card);
+  get_monitor_groups(card);
   get_routing_snks(card);
   get_monitor_group_src_map(card);
 
@@ -1703,7 +1795,8 @@ static void alsa_scan_cards(void) {
 
     if (strncmp(snd_ctl_card_info_get_name(info), "Scarlett", 8) != 0 &&
         strncmp(snd_ctl_card_info_get_name(info), "Clarett", 7) != 0 &&
-        strncmp(snd_ctl_card_info_get_name(info), "Vocaster", 8) != 0)
+        strncmp(snd_ctl_card_info_get_name(info), "Vocaster", 8) != 0 &&
+        strncmp(snd_ctl_card_info_get_name(info), "ISA", 3) != 0)
       goto next;
 
     // is there already an entry for this card in alsa_cards?

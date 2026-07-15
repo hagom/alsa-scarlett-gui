@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
+// SPDX-FileCopyrightText: 2022-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <gtk/gtk.h>
@@ -1160,36 +1160,26 @@ static void sync_monitor_groups_on_link(
 
   struct alsa_card *card = snk_l->elem->card;
 
-  // Enable: left wins → write to right
-  if (snk_l->main_group_switch && snk_r->main_group_switch) {
-    long val = alsa_get_elem_value(snk_l->main_group_switch);
-    alsa_set_elem_value(snk_r->main_group_switch, val);
-  }
-  if (snk_l->alt_group_switch && snk_r->alt_group_switch) {
-    long val = alsa_get_elem_value(snk_l->alt_group_switch);
-    alsa_set_elem_value(snk_r->alt_group_switch, val);
-  }
+  for (int g = 0; g < card->monitor_group_count; g++) {
+    struct monitor_group_elems *mg_l = &snk_l->monitor_groups[g];
+    struct monitor_group_elems *mg_r = &snk_r->monitor_groups[g];
 
-  // Source: left wins with partner assignment
-  sync_monitor_group_source_pair(
-    card, snk_l->main_group_source, snk_r->main_group_source
-  );
-  sync_monitor_group_source_pair(
-    card, snk_l->alt_group_source, snk_r->alt_group_source
-  );
+    // Enable: left wins → write to right
+    if (mg_l->enable && mg_r->enable) {
+      long val = alsa_get_elem_value(mg_l->enable);
+      alsa_set_elem_value(mg_r->enable, val);
+    }
 
-  // Trim: average L/R → write average to both
-  if (snk_l->main_group_trim && snk_r->main_group_trim) {
-    long avg = (alsa_get_elem_value(snk_l->main_group_trim) +
-                alsa_get_elem_value(snk_r->main_group_trim)) / 2;
-    alsa_set_elem_value(snk_l->main_group_trim, avg);
-    alsa_set_elem_value(snk_r->main_group_trim, avg);
-  }
-  if (snk_l->alt_group_trim && snk_r->alt_group_trim) {
-    long avg = (alsa_get_elem_value(snk_l->alt_group_trim) +
-                alsa_get_elem_value(snk_r->alt_group_trim)) / 2;
-    alsa_set_elem_value(snk_l->alt_group_trim, avg);
-    alsa_set_elem_value(snk_r->alt_group_trim, avg);
+    // Source: left wins with partner assignment
+    sync_monitor_group_source_pair(card, mg_l->source, mg_r->source);
+
+    // Trim: average L/R → write average to both
+    if (mg_l->trim && mg_r->trim) {
+      long avg = (alsa_get_elem_value(mg_l->trim) +
+                  alsa_get_elem_value(mg_r->trim)) / 2;
+      alsa_set_elem_value(mg_l->trim, avg);
+      alsa_set_elem_value(mg_r->trim, avg);
+    }
   }
 }
 
@@ -1255,30 +1245,16 @@ static void register_monitor_group_sync_callbacks(
   if (!snk_r)
     return;
 
-  register_mg_sync_pair(
-    snk_l, snk_l->main_group_switch, snk_r->main_group_switch,
-    MG_SYNC_VALUE
-  );
-  register_mg_sync_pair(
-    snk_l, snk_l->alt_group_switch, snk_r->alt_group_switch,
-    MG_SYNC_VALUE
-  );
-  register_mg_sync_pair(
-    snk_l, snk_l->main_group_source, snk_r->main_group_source,
-    MG_SYNC_SOURCE
-  );
-  register_mg_sync_pair(
-    snk_l, snk_l->alt_group_source, snk_r->alt_group_source,
-    MG_SYNC_SOURCE
-  );
-  register_mg_sync_pair(
-    snk_l, snk_l->main_group_trim, snk_r->main_group_trim,
-    MG_SYNC_VALUE
-  );
-  register_mg_sync_pair(
-    snk_l, snk_l->alt_group_trim, snk_r->alt_group_trim,
-    MG_SYNC_VALUE
-  );
+  struct alsa_card *card = snk_l->elem->card;
+
+  for (int g = 0; g < card->monitor_group_count; g++) {
+    struct monitor_group_elems *mg_l = &snk_l->monitor_groups[g];
+    struct monitor_group_elems *mg_r = &snk_r->monitor_groups[g];
+
+    register_mg_sync_pair(snk_l, mg_l->enable, mg_r->enable, MG_SYNC_VALUE);
+    register_mg_sync_pair(snk_l, mg_l->source, mg_r->source, MG_SYNC_SOURCE);
+    register_mg_sync_pair(snk_l, mg_l->trim, mg_r->trim, MG_SYNC_VALUE);
+  }
 }
 
 // Callback when source link state changes

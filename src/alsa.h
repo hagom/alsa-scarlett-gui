@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
+// SPDX-FileCopyrightText: 2022-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
@@ -10,6 +10,16 @@
 
 // simulated cards have card->num set to -1
 #define SIMULATED_CARD_NUM -1
+
+// maximum number of monitor groups (Main, Alt 1, Alt 2)
+#define MAX_MONITOR_GROUPS 3
+
+// controls for one monitor group of one output (NULL if none)
+struct monitor_group_elems {
+  struct alsa_elem *enable;
+  struct alsa_elem *source;
+  struct alsa_elem *trim;
+};
 
 // forward definitions
 struct alsa_elem;
@@ -192,13 +202,9 @@ struct routing_snk {
   // cached left channel status (for fixed mixer inputs, based on source)
   int is_left;
 
-  // pointers to monitor group controls (NULL if not applicable)
-  struct alsa_elem *main_group_switch;
-  struct alsa_elem *alt_group_switch;
-  struct alsa_elem *main_group_source;
-  struct alsa_elem *alt_group_source;
-  struct alsa_elem *main_group_trim;
-  struct alsa_elem *alt_group_trim;
+  // per-group monitor group controls, indexed to match the card's
+  // monitor_group_names (NULL if not applicable)
+  struct monitor_group_elems monitor_groups[MAX_MONITOR_GROUPS];
 
   // cached level meter index (-1 if none)
   int level_index;
@@ -288,6 +294,15 @@ struct alsa_card {
   GArray             *routing_snks;
   int                *monitor_group_src_map;
   int                 monitor_group_src_map_count;
+
+  // monitor group names ("Main"/"Alt" or "Main"/"Alt 1"/"Alt 2")
+  // detected from the group switch control names
+  const char         *monitor_group_names[MAX_MONITOR_GROUPS];
+  int                 monitor_group_count;
+
+  // the control selecting the active monitor group; its value is the
+  // group index (a bool control on two-group devices)
+  struct alsa_elem   *monitor_group_select_elem;
   GIOChannel         *io_channel;
   guint               event_source_id;
   GtkWidget          *window_main;
@@ -399,6 +414,12 @@ void alsa_elem_add_callback(
   void             *data,
   GDestroyNotify    destroy  // cleanup function, NULL if no cleanup needed
 );
+
+// monitor group queries
+int snk_in_monitor_group(struct routing_snk *r_snk, int group);
+int snk_in_any_monitor_group(struct routing_snk *r_snk);
+int monitor_group_has_outputs(struct alsa_card *card, int group);
+int get_active_monitor_group(struct alsa_card *card);
 
 // remove all callbacks with matching data pointer from an element
 void alsa_elem_remove_callbacks_by_data(struct alsa_elem *elem, void *data);

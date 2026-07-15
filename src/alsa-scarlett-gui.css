@@ -246,6 +246,42 @@ button.toggle {
   text-shadow: 0 0 5px #ff0000, 0 0 15px #c00000;
 }
 
+/* Plain buttons paired with an arrow (monitor group cycle, switch dial)
+ * don't get GtkToggleButton's .toggle class, so give them the same
+ * padding to keep the pair the height of a normal button. As above,
+ * padding needs a selector without .window-frame.
+ */
+.cycle-drop-down button,
+.switch-dial-arrow {
+  padding: 0px 5px 0px 5px;
+}
+
+/* keep the arrow as narrow as its icon rather than the theme's
+ * minimum button width
+ */
+.cycle-drop-down-arrow,
+.switch-dial-arrow {
+  min-width: 0;
+}
+
+/* Monitor group cycle button: green for Main, red for the Alt groups,
+ * matching the Main/Alt toggle above.
+ */
+.window-frame .cycle-drop-down button.selected-main {
+  color: #ffffff;
+  text-shadow: 0 0 5px #00ff00, 0 0 15px #00c000;
+}
+
+.window-frame .cycle-drop-down button.selected-alt1,
+.window-frame .cycle-drop-down button.selected-alt2 {
+  color: #ffffff;
+  text-shadow: 0 0 5px #ff0000, 0 0 15px #c00000;
+}
+
+.window-frame .cycle-drop-down button:disabled {
+  text-shadow: none;
+}
+
 .window-frame button.talkback-enable:checked {
   text-shadow: 0 0 5px #00c000, 0 0 15px #00c000;
 }
@@ -335,6 +371,39 @@ button.toggle {
 
 .window-frame button.dsp:checked {
   text-shadow: 0 0 5px #00c000, 0 0 15px #00c000;
+}
+
+/* ISA C8X input controls (Console and Drive are compound widgets, so
+   the class is on the containing box) */
+.window-frame .console button:checked {
+  text-shadow: 0 0 5px #ffc000, 0 0 15px #ffc000;
+}
+
+.window-frame .drive button:checked {
+  text-shadow: 0 0 5px #ffc000, 0 0 15px #ffc000;
+}
+
+.window-frame button.insert image,
+.window-frame button.hpf image {
+  opacity: 0.4;
+  -gtk-icon-size: 20px;
+}
+
+.window-frame button.insert:checked image,
+.window-frame button.hpf:checked image {
+  opacity: 1;
+  filter: drop-shadow(0 0 5px #00c000) drop-shadow(0 0 15px #00c000);
+}
+
+/* stereo link toggle between the channel select buttons */
+.window-frame button.input-link.flat image {
+  opacity: 0.5;
+  -gtk-icon-size: 20px;
+}
+
+.window-frame button.input-link.flat:checked image {
+  opacity: 1;
+  filter: drop-shadow(0 0 5px #4488ff) drop-shadow(0 0 15px #4488ff);
 }
 
 /* Direct Monitor Checked (Solo) */
@@ -540,6 +609,16 @@ button.toggle {
 .window-frame popover > contents {
   padding: 8px;
   border-radius: 8px;
+}
+
+/* Floating level dial popup (styled to match popovers) */
+.switch-dial-popup {
+  background-color: #282828;
+  color: #d0d0d0;
+  border: 1px solid #a00000;
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 /* Popover list item styling */

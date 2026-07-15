@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
+// SPDX-FileCopyrightText: 2022-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <stdio.h>
@@ -72,6 +72,11 @@ static const struct io_limits limits_table[] = {
   { PID_SCARLETT_GEN4_18I20, MODE_RCA_SPDIF,     { 2, 2, 0 },   { 2, 2, 2 },   { 8, 4, 0 },   { 8, 4, 0 }   },
   { PID_SCARLETT_GEN4_18I20, MODE_OPTICAL_SPDIF, { 4, 4, 0 },   { 4, 4, 2 },   { 8, 4, 0 },   { 8, 4, 0 }   },
   { PID_SCARLETT_GEN4_18I20, MODE_DUAL_ADAT,     { 0, 0, 0 },   { 2, 2, 2 },   { 16, 8, 0 },  { 16, 8, 0 }  },
+
+  // ISA C8X digital I/O matches the Gen 4 18i20
+  { PID_ISA_C8X,             MODE_RCA_SPDIF,     { 2, 2, 0 },   { 2, 2, 2 },   { 8, 4, 0 },   { 8, 4, 0 }   },
+  { PID_ISA_C8X,             MODE_OPTICAL_SPDIF, { 2, 2, 0 },   { 2, 2, 2 },   { 8, 4, 0 },   { 8, 4, 0 }   },
+  { PID_ISA_C8X,             MODE_DUAL_ADAT,     { 0, 0, 0 },   { 2, 2, 2 },   { 16, 8, 0 },  { 16, 8, 0 }  },
 
   { 0 }
 };

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
+// SPDX-FileCopyrightText: 2022-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "gtkhelper.h"
@@ -1365,118 +1365,23 @@ static gboolean routing_drop(
   return FALSE;
 }
 
-// Speaker switching states
-#define SPEAKER_SWITCH_OFF  0
-#define SPEAKER_SWITCH_MAIN 1
-#define SPEAKER_SWITCH_ALT  2
-
-// Check if any Alt Group Output is enabled (Gen 4)
-static int has_any_alt_group_enabled(struct alsa_card *card) {
-  for (int i = 1; i <= 8; i++) {
-    char name[64];
-    snprintf(name, sizeof(name), "Alt Group Output %d Playback Switch", i);
-    struct alsa_elem *elem = get_elem_by_name(card->elems, name);
-    if (elem && alsa_get_elem_value(elem))
-      return 1;
-  }
-  return 0;
-}
-
-static int has_any_main_group_enabled(struct alsa_card *card) {
-  for (int i = 1; i <= 8; i++) {
-    char name[64];
-    snprintf(name, sizeof(name),
-             "Main Group Output %d Playback Switch", i);
-    struct alsa_elem *elem = get_elem_by_name(card->elems, name);
-    if (elem && alsa_get_elem_value(elem))
-      return 1;
-  }
-  return 0;
-}
-
-// Get speaker switching state: 0=off, 1=main, 2=alt
-static int get_speaker_switching_state(struct alsa_card *card) {
-  // Try enum version first (Gen 2/3 larger models)
-  struct alsa_elem *elem = get_elem_by_name(
-    card->elems, "Speaker Switching Playback Enum"
-  );
-  if (elem) {
-    int val = alsa_get_elem_value(elem);
-    // Enum values: 0=Off, 1=Main, 2=Alt
-    if (val == 0)
-      return SPEAKER_SWITCH_OFF;
-    return val == 2 ? SPEAKER_SWITCH_ALT : SPEAKER_SWITCH_MAIN;
-  }
-
-  // Check for Main/Alt Group controls (Gen 4)
-  struct alsa_elem *main_group = get_elem_by_prefix(
-    card->elems, "Main Group Output"
-  );
-  if (main_group) {
-    if (has_any_alt_group_enabled(card)) {
-      // Alt outputs configured: check which group is active
-      struct alsa_elem *alt = get_elem_by_name(
-        card->elems, "Speaker Switching Alt Playback Switch"
-      );
-      if (alt && alsa_get_elem_value(alt))
-        return SPEAKER_SWITCH_ALT;
-      return SPEAKER_SWITCH_MAIN;
-    }
-
-    // No alt outputs: show Main indicator if main outputs exist
-    if (has_any_main_group_enabled(card))
-      return SPEAKER_SWITCH_MAIN;
-
-    return SPEAKER_SWITCH_OFF;
-  }
-
-  // Try switch version (Gen 2/3 smaller models)
-  struct alsa_elem *sw = get_elem_by_name(
-    card->elems, "Speaker Switching Playback Switch"
-  );
-  struct alsa_elem *alt = get_elem_by_name(
-    card->elems, "Speaker Switching Alt Playback Switch"
-  );
-  if (sw && alt) {
-    if (!alsa_get_elem_value(sw))
-      return SPEAKER_SWITCH_OFF;
-    if (alsa_get_elem_value(alt))
-      return SPEAKER_SWITCH_ALT;
-    return SPEAKER_SWITCH_MAIN;
-  }
-
-  return SPEAKER_SWITCH_OFF;
-}
-
 // Check if a sink is currently muted (in inactive monitor group)
 int is_snk_monitor_muted(struct routing_snk *r_snk) {
   struct alsa_elem *elem = r_snk->elem;
 
-  // Only HW analogue outputs can be muted by speaker switching
+  // Only HW analogue outputs can be muted by monitor group switching
   if (elem->port_category != PC_HW || elem->hw_type != HW_TYPE_ANALOGUE)
     return 0;
 
-  // If no group controls, not muted
-  if (!r_snk->main_group_switch && !r_snk->alt_group_switch)
+  // If not in any group, not muted
+  if (!snk_in_any_monitor_group(r_snk))
     return 0;
 
-  int in_main = r_snk->main_group_switch &&
-                alsa_get_elem_value(r_snk->main_group_switch);
-  int in_alt = r_snk->alt_group_switch &&
-               alsa_get_elem_value(r_snk->alt_group_switch);
-
-  // If not in either group, not muted
-  if (!in_main && !in_alt)
+  int active = get_active_monitor_group(elem->card);
+  if (active < 0)
     return 0;
 
-  int speaker_state = get_speaker_switching_state(elem->card);
-
-  // OFF or MAIN active: muted if only in Alt group
-  if (speaker_state == SPEAKER_SWITCH_OFF || speaker_state == SPEAKER_SWITCH_MAIN)
-    return in_alt && !in_main;
-
-  // ALT active: muted if only in Main group
-  return in_main && !in_alt;
+  return !snk_in_monitor_group(r_snk, active);
 }
 
 // Get the element to modify for routing changes to a sink.
@@ -1485,37 +1390,22 @@ int is_snk_monitor_muted(struct routing_snk *r_snk) {
 static struct alsa_elem *get_snk_routing_elem(struct routing_snk *r_snk) {
   struct alsa_elem *elem = r_snk->elem;
 
-  // Only HW analogue outputs can be affected by speaker switching
+  // Only HW analogue outputs can be affected by monitor groups
   if (elem->port_category != PC_HW || elem->hw_type != HW_TYPE_ANALOGUE)
     return elem;
 
-  // If no group controls, use normal routing
-  if (!r_snk->main_group_switch && !r_snk->alt_group_switch)
+  // If not in any group, use normal routing
+  if (!snk_in_any_monitor_group(r_snk))
     return elem;
 
-  int in_main = r_snk->main_group_switch &&
-                alsa_get_elem_value(r_snk->main_group_switch);
-  int in_alt = r_snk->alt_group_switch &&
-               alsa_get_elem_value(r_snk->alt_group_switch);
-
-  // If not in either group, use normal routing
-  if (!in_main && !in_alt)
+  int active = get_active_monitor_group(elem->card);
+  if (active < 0)
     return elem;
 
-  int speaker_state = get_speaker_switching_state(elem->card);
+  if (snk_in_monitor_group(r_snk, active))
+    return r_snk->monitor_groups[active].source;
 
-  // OFF or MAIN active
-  if (speaker_state == SPEAKER_SWITCH_OFF || speaker_state == SPEAKER_SWITCH_MAIN) {
-    if (in_main)
-      return r_snk->main_group_source;
-    // Only in Alt group while Main is active - muted
-    return NULL;
-  }
-
-  // ALT active
-  if (in_alt)
-    return r_snk->alt_group_source;
-  // Only in Main group while Alt is active - muted
+  // In a group, but not the active one - muted
   return NULL;
 }
 
@@ -1704,49 +1594,26 @@ void update_snk_effective_source(struct routing_snk *r_snk) {
     return;
   }
 
-  // If no group controls, use normal routing
-  if (!r_snk->main_group_switch && !r_snk->alt_group_switch) {
+  // If not in any group, use normal routing
+  if (!snk_in_any_monitor_group(r_snk)) {
     r_snk->effective_source_idx = alsa_get_elem_value(elem);
     return;
   }
 
-  int in_main = r_snk->main_group_switch &&
-                alsa_get_elem_value(r_snk->main_group_switch);
-  int in_alt = r_snk->alt_group_switch &&
-               alsa_get_elem_value(r_snk->alt_group_switch);
+  int active = get_active_monitor_group(card);
 
-  // If not in either group, use normal routing
-  if (!in_main && !in_alt) {
-    r_snk->effective_source_idx = alsa_get_elem_value(elem);
-    return;
-  }
+  if (active >= 0) {
+    struct monitor_group_elems *mg = &r_snk->monitor_groups[active];
 
-  int speaker_state = get_speaker_switching_state(card);
-
-  // Check based on which monitor group is active (OFF means Main is active)
-  if (speaker_state == SPEAKER_SWITCH_OFF || speaker_state == SPEAKER_SWITCH_MAIN) {
-    if (in_main && r_snk->main_group_source) {
-      // Main active and in Main group - use Main Group Source
-      int vg_idx = alsa_get_elem_value(r_snk->main_group_source);
+    if (snk_in_monitor_group(r_snk, active) && mg->source) {
+      // In the active group - use its group source
+      int vg_idx = alsa_get_elem_value(mg->source);
       if (vg_idx < card->monitor_group_src_map_count) {
         r_snk->effective_source_idx = card->monitor_group_src_map[vg_idx];
         return;
       }
-    } else if (in_alt) {
-      // Main active but only in Alt group - muted
-      r_snk->effective_source_idx = 0;
-      return;
-    }
-  } else if (speaker_state == SPEAKER_SWITCH_ALT) {
-    if (in_alt && r_snk->alt_group_source) {
-      // Alt active and in Alt group - use Alt Group Source
-      int vg_idx = alsa_get_elem_value(r_snk->alt_group_source);
-      if (vg_idx < card->monitor_group_src_map_count) {
-        r_snk->effective_source_idx = card->monitor_group_src_map[vg_idx];
-        return;
-      }
-    } else if (in_main) {
-      // Alt active but only in Main group - muted
+    } else {
+      // In a group, but not the active one - muted
       r_snk->effective_source_idx = 0;
       return;
     }
@@ -1828,67 +1695,32 @@ void update_hw_output_label(struct routing_snk *r_snk) {
     return;
   }
 
-  // Check for Main/Alt Group controls
-  char ctrl_name[64];
-  snprintf(ctrl_name, sizeof(ctrl_name),
-           "Main Group Output %d Playback Switch", elem->lr_num);
-  struct alsa_elem *main_elem = get_elem_by_name(card->elems, ctrl_name);
+  // If no monitor group controls or membership, or no group is
+  // active, just use the base name
+  int active = get_active_monitor_group(card);
 
-  snprintf(ctrl_name, sizeof(ctrl_name),
-           "Alt Group Output %d Playback Switch", elem->lr_num);
-  struct alsa_elem *alt_elem = get_elem_by_name(card->elems, ctrl_name);
-
-  // If no monitor group controls, just use base name
-  if (!main_elem && !alt_elem) {
+  if (!snk_in_any_monitor_group(r_snk) || active < 0) {
     gtk_label_set_text(GTK_LABEL(r_snk->label_widget), base_name);
     gtk_label_set_use_markup(GTK_LABEL(r_snk->label_widget), FALSE);
     g_free(base_name);
     return;
   }
 
-  int speaker_state = get_speaker_switching_state(card);
-  int in_main = main_elem && alsa_get_elem_value(main_elem);
-  int in_alt = alt_elem && alsa_get_elem_value(alt_elem);
+  char *label_text;
 
-  char *label_text = NULL;
-
-  if (speaker_state == SPEAKER_SWITCH_OFF) {
-    // Speaker switching off - show normal label
-    gtk_label_set_text(GTK_LABEL(r_snk->label_widget), base_name);
-    gtk_label_set_use_markup(GTK_LABEL(r_snk->label_widget), FALSE);
-  } else if (speaker_state == SPEAKER_SWITCH_MAIN) {
-    if (in_main) {
-      // Active in Main group - green indicator
-      label_text = g_strdup_printf(
-        "%s <span color=\"#4a4\"><small>Main</small></span>", base_name
-      );
-      gtk_label_set_markup(GTK_LABEL(r_snk->label_widget), label_text);
-    } else if (in_alt) {
-      // In Alt group but Main is active - strikethrough
-      label_text = g_strdup_printf("<s>%s</s>", base_name);
-      gtk_label_set_markup(GTK_LABEL(r_snk->label_widget), label_text);
-    } else {
-      // Not in either group - show normal label
-      gtk_label_set_text(GTK_LABEL(r_snk->label_widget), base_name);
-      gtk_label_set_use_markup(GTK_LABEL(r_snk->label_widget), FALSE);
-    }
-  } else {  // SPEAKER_SWITCH_ALT
-    if (in_alt) {
-      // Active in Alt group - red indicator
-      label_text = g_strdup_printf(
-        "%s <span color=\"#f66\"><small>Alt</small></span>", base_name
-      );
-      gtk_label_set_markup(GTK_LABEL(r_snk->label_widget), label_text);
-    } else if (in_main) {
-      // In Main group but Alt is active - strikethrough
-      label_text = g_strdup_printf("<s>%s</s>", base_name);
-      gtk_label_set_markup(GTK_LABEL(r_snk->label_widget), label_text);
-    } else {
-      // Not in either group - show normal label
-      gtk_label_set_text(GTK_LABEL(r_snk->label_widget), base_name);
-      gtk_label_set_use_markup(GTK_LABEL(r_snk->label_widget), FALSE);
-    }
+  if (snk_in_monitor_group(r_snk, active)) {
+    // Active group indicator: green for Main, red for the Alt groups
+    label_text = g_strdup_printf(
+      "%s <span color=\"%s\"><small>%s</small></span>",
+      base_name,
+      active == 0 ? "#4a4" : "#f66",
+      card->monitor_group_names[active]
+    );
+  } else {
+    // In a group, but not the active one - strikethrough
+    label_text = g_strdup_printf("<s>%s</s>", base_name);
   }
+  gtk_label_set_markup(GTK_LABEL(r_snk->label_widget), label_text);
 
   g_free(label_text);
   g_free(base_name);
@@ -2168,29 +2000,25 @@ static void add_routing_widgets(
   if (ss_alt)
     alsa_elem_add_callback(ss_alt, monitor_group_changed, NULL, NULL);
 
-  // Register callbacks on Main/Alt Group controls (switches and sources)
-  for (int i = 1; i <= 8; i++) {
-    char name[64];
+  if (card->monitor_group_select_elem)
+    alsa_elem_add_callback(
+      card->monitor_group_select_elem, monitor_group_changed, NULL, NULL
+    );
 
-    snprintf(name, sizeof(name), "Main Group Output %d Playback Switch", i);
-    struct alsa_elem *main_sw = get_elem_by_name(card->elems, name);
-    if (main_sw)
-      alsa_elem_add_callback(main_sw, monitor_group_changed, NULL, NULL);
+  // Register callbacks on the group enable and source controls
+  for (int i = 0; i < card->routing_snks->len; i++) {
+    struct routing_snk *snk = &g_array_index(
+      card->routing_snks, struct routing_snk, i
+    );
 
-    snprintf(name, sizeof(name), "Alt Group Output %d Playback Switch", i);
-    struct alsa_elem *alt_sw = get_elem_by_name(card->elems, name);
-    if (alt_sw)
-      alsa_elem_add_callback(alt_sw, monitor_group_changed, NULL, NULL);
+    for (int g = 0; g < card->monitor_group_count; g++) {
+      struct monitor_group_elems *mg = &snk->monitor_groups[g];
 
-    snprintf(name, sizeof(name), "Main Group Output %d Source Playback Enum", i);
-    struct alsa_elem *main_src = get_elem_by_name(card->elems, name);
-    if (main_src)
-      alsa_elem_add_callback(main_src, monitor_group_changed, NULL, NULL);
-
-    snprintf(name, sizeof(name), "Alt Group Output %d Source Playback Enum", i);
-    struct alsa_elem *alt_src = get_elem_by_name(card->elems, name);
-    if (alt_src)
-      alsa_elem_add_callback(alt_src, monitor_group_changed, NULL, NULL);
+      if (mg->enable)
+        alsa_elem_add_callback(mg->enable, monitor_group_changed, NULL, NULL);
+      if (mg->source)
+        alsa_elem_add_callback(mg->source, monitor_group_changed, NULL, NULL);
+    }
   }
 
   // Initialize effective source indices for all sinks

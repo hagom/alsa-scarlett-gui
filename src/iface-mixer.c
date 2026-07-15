@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
+// SPDX-FileCopyrightText: 2022-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "glow.h"
@@ -10,6 +10,7 @@
 #include "stringhelper.h"
 #include "tooltips.h"
 #include "widget-boolean.h"
+#include "widget-switch-dial.h"
 #include "widget-drop-down.h"
 #include "widget-dual.h"
 #include "widget-gain.h"
@@ -236,18 +237,6 @@ static void add_speaker_switching_controls_switches(
   gtk_box_append(GTK_BOX(global_controls), box);
 }
 
-// Check if any Alt Group Output is enabled (Gen 4)
-static int has_any_alt_group_enabled(struct alsa_card *card) {
-  for (int i = 1; i <= 8; i++) {
-    char name[64];
-    snprintf(name, sizeof(name), "Alt Group Output %d Playback Switch", i);
-    struct alsa_elem *elem = get_elem_by_name(card->elems, name);
-    if (elem && alsa_get_elem_value(elem))
-      return 1;
-  }
-  return 0;
-}
-
 // Callback to update speaker switching button sensitivity
 static void update_speaker_switching_sensitivity(
   struct alsa_elem *elem,
@@ -256,8 +245,7 @@ static void update_speaker_switching_sensitivity(
   GtkWidget *button = data;
   struct alsa_card *card = elem->card;
 
-  int enabled = has_any_alt_group_enabled(card);
-  gtk_widget_set_sensitive(button, enabled);
+  gtk_widget_set_sensitive(button, monitor_group_has_outputs(card, 1));
 }
 
 // Gen 4: Main/Alt selector only (speaker switching is implicit)
@@ -293,15 +281,127 @@ static void add_speaker_switching_controls_gen4(
   gtk_widget_add_css_class(w, "speaker-switching-alt");
 
   // Set initial sensitivity based on whether any Alt output is enabled
-  gtk_widget_set_sensitive(w, has_any_alt_group_enabled(card));
+  gtk_widget_set_sensitive(w, monitor_group_has_outputs(card, 1));
 
-  // Register callbacks on Alt Group Output switches to update sensitivity
-  for (int i = 1; i <= 8; i++) {
-    char name[64];
-    snprintf(name, sizeof(name), "Alt Group Output %d Playback Switch", i);
-    struct alsa_elem *alt_out = get_elem_by_name(elems, name);
+  // Register callbacks on Alt Group enable switches to update sensitivity
+  for (int i = 0; i < card->routing_snks->len; i++) {
+    struct routing_snk *snk = &g_array_index(
+      card->routing_snks, struct routing_snk, i
+    );
+    struct alsa_elem *alt_out = snk->monitor_groups[1].enable;
+
     if (alt_out)
-      alsa_elem_add_callback(alt_out, update_speaker_switching_sensitivity, w, NULL);
+      alsa_elem_add_callback(
+        alt_out, update_speaker_switching_sensitivity, w, NULL
+      );
+  }
+
+  gtk_box_append(GTK_BOX(box), l);
+  gtk_box_append(GTK_BOX(box), w);
+  gtk_box_append(GTK_BOX(global_controls), box);
+}
+
+// Monitor group selector for devices with more than two monitor
+// groups (e.g. ISA C8X Main/Alt 1/Alt 2), exposed as an enum control.
+// As with the two-group Main/Alt toggle, it is only sensitive when an
+// Alt group has outputs to switch to.
+
+static int mg_select_value_to_row(int value, void *user_data) {
+  return value;
+}
+
+static int mg_select_row_to_value(
+  int   row,
+  int   current_value,
+  void *user_data
+) {
+  return row;
+}
+
+static char *mg_select_button_label(int value, void *user_data) {
+  struct alsa_card *card = user_data;
+
+  return g_strdup(card->monitor_group_names[value]);
+}
+
+// Main always available; an Alt group is only reachable once it has
+// outputs assigned.
+static int mg_select_row_enabled(int row, void *user_data) {
+  struct alsa_card *card = user_data;
+
+  return row == 0 || monitor_group_has_outputs(card, row);
+}
+
+static int mg_select_sensitive(int value, void *user_data) {
+  struct alsa_card *card = user_data;
+
+  for (int g = 1; g < card->monitor_group_count; g++)
+    if (monitor_group_has_outputs(card, g))
+      return 1;
+  return 0;
+}
+
+static const struct drop_down_value_ops mg_select_ops = {
+  .value_to_row = mg_select_value_to_row,
+  .row_to_value = mg_select_row_to_value,
+  .button_label = mg_select_button_label,
+  .sensitive    = mg_select_sensitive,
+  .row_enabled  = mg_select_row_enabled
+};
+
+// the selectable groups depend on the group enables, so poke the
+// selector's callbacks when they change
+static void mg_select_outputs_changed(
+  struct alsa_elem *elem,
+  void             *private
+) {
+  struct alsa_card *card = private;
+
+  alsa_elem_change(card->monitor_group_select_elem);
+}
+
+static void add_monitor_group_enum_control(
+  struct alsa_card *card,
+  GtkWidget        *global_controls
+) {
+  struct alsa_elem *elem = get_elem_by_name(
+    card->elems, "Monitor Group Playback Enum"
+  );
+
+  if (!elem)
+    return;
+
+  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+  gtk_widget_set_tooltip_text(
+    box,
+    "Monitor Group lets you swap between the Main, Alt 1, and Alt 2 "
+    "monitor groups. Click to cycle through the groups, or use the "
+    "arrow to select one. Configure which outputs belong to each group "
+    "in the Configuration window."
+  );
+
+  GtkWidget *l = gtk_label_new("Monitor Group");
+
+  GtkStringList *model = gtk_string_list_new(NULL);
+  for (int g = 0; g < card->monitor_group_count; g++)
+    gtk_string_list_append(model, card->monitor_group_names[g]);
+
+  GtkWidget *w = make_cycle_drop_down_alsa_elem(
+    elem, model, &mg_select_ops, card, NULL
+  );
+
+  // refresh the selectable groups when any group enable changes
+  for (int i = 0; i < card->routing_snks->len; i++) {
+    struct routing_snk *snk = &g_array_index(
+      card->routing_snks, struct routing_snk, i
+    );
+
+    for (int g = 0; g < card->monitor_group_count; g++)
+      if (snk->monitor_groups[g].enable)
+        alsa_elem_add_callback(
+          snk->monitor_groups[g].enable,
+          mg_select_outputs_changed, card, NULL
+        );
   }
 
   gtk_box_append(GTK_BOX(box), l);
@@ -311,9 +411,8 @@ static void add_speaker_switching_controls_gen4(
 
 // Structure to track output volume widget and its monitor group elements
 struct output_volume_group_data {
-  GtkWidget        *widget;
-  struct alsa_elem *main_group_switch;
-  struct alsa_elem *alt_group_switch;
+  GtkWidget          *widget;
+  struct routing_snk *snk;
 };
 
 // Check if output is in a monitor group and update widget sensitivity
@@ -323,14 +422,7 @@ static void update_output_volume_sensitivity(
 ) {
   struct output_volume_group_data *d = data;
 
-  int in_group = 0;
-
-  if (d->main_group_switch && alsa_get_elem_value(d->main_group_switch))
-    in_group = 1;
-  if (d->alt_group_switch && alsa_get_elem_value(d->alt_group_switch))
-    in_group = 1;
-
-  gtk_widget_set_sensitive(d->widget, !in_group);
+  gtk_widget_set_sensitive(d->widget, !snk_in_any_monitor_group(d->snk));
 }
 
 // Free output volume group data
@@ -370,33 +462,24 @@ static void setup_output_volume_monitor_group(
     return;
 
   // Check if this output has monitor group controls
-  if (!snk->main_group_switch && !snk->alt_group_switch)
+  if (!snk->monitor_groups[0].enable)
     return;
 
   // Create tracking data
   struct output_volume_group_data *data =
     g_malloc(sizeof(struct output_volume_group_data));
   data->widget = widget;
-  data->main_group_switch = snk->main_group_switch;
-  data->alt_group_switch = snk->alt_group_switch;
+  data->snk = snk;
 
-  // Register callbacks on the group switches
-  if (snk->main_group_switch) {
-    alsa_elem_add_callback(
-      snk->main_group_switch,
-      update_output_volume_sensitivity,
-      data,
-      NULL
-    );
-  }
-  if (snk->alt_group_switch) {
-    alsa_elem_add_callback(
-      snk->alt_group_switch,
-      update_output_volume_sensitivity,
-      data,
-      NULL
-    );
-  }
+  // Register callbacks on the group enable switches
+  for (int g = 0; g < card->monitor_group_count; g++)
+    if (snk->monitor_groups[g].enable)
+      alsa_elem_add_callback(
+        snk->monitor_groups[g].enable,
+        update_output_volume_sensitivity,
+        data,
+        NULL
+      );
 
   // Attach cleanup to the widget
   g_object_weak_ref(
@@ -406,20 +489,13 @@ static void setup_output_volume_monitor_group(
   );
 
   // Set initial sensitivity
-  int in_group = 0;
-  if (snk->main_group_switch && alsa_get_elem_value(snk->main_group_switch))
-    in_group = 1;
-  if (snk->alt_group_switch && alsa_get_elem_value(snk->alt_group_switch))
-    in_group = 1;
-  gtk_widget_set_sensitive(widget, !in_group);
+  gtk_widget_set_sensitive(widget, !snk_in_any_monitor_group(snk));
 }
 
 // Structure to track monitor group label widget
 struct monitor_group_label_data {
-  GtkWidget        *label;
-  struct alsa_elem *main_group_switch;
-  struct alsa_elem *alt_group_switch;
-  struct alsa_elem *speaker_switch_alt;
+  GtkWidget          *label;
+  struct routing_snk *snk;
 };
 
 // Update monitor group label based on current state
@@ -428,47 +504,35 @@ static void update_monitor_group_label(
   void             *data
 ) {
   struct monitor_group_label_data *d = data;
-
-  int in_main = d->main_group_switch &&
-                alsa_get_elem_value(d->main_group_switch);
-  int in_alt = d->alt_group_switch &&
-               alsa_get_elem_value(d->alt_group_switch);
+  struct alsa_card *card = d->snk->elem->card;
 
   // If not in any group, hide the label
-  if (!in_main && !in_alt) {
+  if (!snk_in_any_monitor_group(d->snk)) {
     gtk_label_set_text(GTK_LABEL(d->label), "");
     return;
   }
 
-  // Check which group is active (0 = Main, 1 = Alt)
-  int alt_active = d->speaker_switch_alt &&
-                   alsa_get_elem_value(d->speaker_switch_alt);
+  int active = get_active_monitor_group(card);
 
-  if (in_main && !alt_active) {
-    // Active in Main group - green
-    gtk_label_set_markup(
-      GTK_LABEL(d->label),
-      "<span color=\"#4a4\" size=\"small\">Main</span>"
-    );
-  } else if (in_alt && alt_active) {
-    // Active in Alt group - red
-    gtk_label_set_markup(
-      GTK_LABEL(d->label),
-      "<span color=\"#f66\" size=\"small\">Alt</span>"
-    );
-  } else if (in_main && alt_active) {
-    // In Main but Alt is active - dimmed
-    gtk_label_set_markup(
-      GTK_LABEL(d->label),
-      "<span color=\"#666\" size=\"small\">Main</span>"
-    );
-  } else if (in_alt && !alt_active) {
-    // In Alt but Main is active - dimmed
-    gtk_label_set_markup(
-      GTK_LABEL(d->label),
-      "<span color=\"#666\" size=\"small\">Alt</span>"
-    );
+  // Active group membership: green for Main, red for the Alt groups;
+  // membership of an inactive group only: dimmed
+  int group;
+  const char *colour;
+  if (active >= 0 && snk_in_monitor_group(d->snk, active)) {
+    group = active;
+    colour = active == 0 ? "#4a4" : "#f66";
+  } else {
+    for (group = 0; !snk_in_monitor_group(d->snk, group); group++)
+      ;
+    colour = "#666";
   }
+
+  char *markup = g_markup_printf_escaped(
+    "<span color=\"%s\" size=\"small\">%s</span>",
+    colour, card->monitor_group_names[group]
+  );
+  gtk_label_set_markup(GTK_LABEL(d->label), markup);
+  g_free(markup);
 }
 
 // Free monitor group label data
@@ -486,13 +550,8 @@ static GtkWidget *create_monitor_group_label(
     return NULL;
 
   // Check if this output has monitor group controls
-  if (!snk->main_group_switch && !snk->alt_group_switch)
+  if (!snk->monitor_groups[0].enable)
     return NULL;
-
-  // Get the speaker switching alt control
-  struct alsa_elem *speaker_switch_alt = get_elem_by_name(
-    card->elems, "Speaker Switching Alt Playback Switch"
-  );
 
   // Create label widget
   GtkWidget *label = gtk_label_new("");
@@ -502,22 +561,19 @@ static GtkWidget *create_monitor_group_label(
   struct monitor_group_label_data *data =
     g_malloc(sizeof(struct monitor_group_label_data));
   data->label = label;
-  data->main_group_switch = snk->main_group_switch;
-  data->alt_group_switch = snk->alt_group_switch;
-  data->speaker_switch_alt = speaker_switch_alt;
+  data->snk = snk;
 
   // Register callbacks on all relevant controls
-  if (snk->main_group_switch)
+  for (int g = 0; g < card->monitor_group_count; g++)
+    if (snk->monitor_groups[g].enable)
+      alsa_elem_add_callback(
+        snk->monitor_groups[g].enable,
+        update_monitor_group_label, data, NULL
+      );
+  if (card->monitor_group_select_elem)
     alsa_elem_add_callback(
-      snk->main_group_switch, update_monitor_group_label, data, NULL
-    );
-  if (snk->alt_group_switch)
-    alsa_elem_add_callback(
-      snk->alt_group_switch, update_monitor_group_label, data, NULL
-    );
-  if (speaker_switch_alt)
-    alsa_elem_add_callback(
-      speaker_switch_alt, update_monitor_group_label, data, NULL
+      card->monitor_group_select_elem,
+      update_monitor_group_label, data, NULL
     );
 
   // Attach cleanup to the widget
@@ -644,27 +700,92 @@ static void create_input_select_control(
   (*current_row)++;
 }
 
-static void create_input_link_control(
+// Input type (Mic/Line/Inst) values for devices with per-channel
+// input selection (ISA C8X); several controls are only applicable to
+// particular input types.
+enum {
+  INPUT_TYPE_MIC  = 0,
+  INPUT_TYPE_LINE = 1,
+  INPUT_TYPE_INST = 2
+};
+
+#define INPUT_TYPE_MASK_MIC      (1 << INPUT_TYPE_MIC)
+#define INPUT_TYPE_MASK_MIC_INST \
+  ((1 << INPUT_TYPE_MIC) | (1 << INPUT_TYPE_INST))
+
+// find the channel's input type control, if the device has one
+static struct alsa_elem *get_input_type_elem(struct alsa_elem *elem) {
+  char name[64];
+
+  snprintf(
+    name, sizeof(name),
+    "Line In %d Input Type Capture Enum",
+    get_num_from_string(elem->name)
+  );
+  return get_elem_by_name(elem->card->elems, name);
+}
+
+// Grey out an input control when the channel's input type doesn't
+// support it. type_mask has bit (1 << type) set for each input type
+// value the control is available for.
+struct input_type_gate {
+  struct alsa_elem *input_type_elem;
+  struct alsa_elem *elem;
+  GtkWidget        *widget;
+  unsigned int      type_mask;
+};
+
+static void input_type_gate_updated(
   struct alsa_elem *elem,
-  GtkWidget        *grid,
-  int               current_row,
-  int               column_num
+  void             *private
 ) {
-  GtkWidget *w = make_boolean_alsa_elem(elem, "Link", NULL);
-  gtk_widget_add_css_class(w, "input-link");
-  gtk_widget_set_hexpand(w, TRUE);
+  struct input_type_gate *gate = private;
 
-  int from, to;
-  get_two_num_from_string(elem->name, &from, &to);
+  int type = alsa_get_elem_value(gate->input_type_elem);
+  gtk_widget_set_sensitive(
+    gate->widget, !!(gate->type_mask & (1u << type))
+  );
+}
 
-  // skip even numbers
-  if (!(from % 2))
+static void input_type_gate_destroy(
+  GtkWidget *widget,
+  gpointer   user_data
+) {
+  struct input_type_gate *gate = user_data;
+
+  alsa_elem_remove_callbacks_by_data(gate->input_type_elem, gate);
+  alsa_elem_remove_callbacks_by_data(gate->elem, gate);
+  g_free(gate);
+}
+
+static void gate_input_control_on_type(
+  GtkWidget        *widget,
+  struct alsa_elem *elem,
+  unsigned int      type_mask
+) {
+  struct alsa_elem *input_type_elem = get_input_type_elem(elem);
+
+  if (!input_type_elem)
     return;
 
-  if (to == -1)
-    to = from + 1;
+  struct input_type_gate *gate = g_malloc0(sizeof(*gate));
+  gate->input_type_elem = input_type_elem;
+  gate->elem = elem;
+  gate->widget = widget;
+  gate->type_mask = type_mask;
 
-  gtk_grid_attach(GTK_GRID(grid), w, from - 1, current_row, to - from + 1, 1);
+  // also registered on the control's own element, after the widget's
+  // own callback, so the gate wins when the widget re-asserts
+  // sensitivity from writability
+  alsa_elem_add_callback(
+    input_type_elem, input_type_gate_updated, gate, NULL
+  );
+  alsa_elem_add_callback(elem, input_type_gate_updated, gate, NULL);
+  g_signal_connect(
+    widget, "destroy", G_CALLBACK(input_type_gate_destroy), gate
+  );
+
+  input_type_gate_updated(input_type_elem, gate);
 }
 
 static void create_input_gain_control(
@@ -675,6 +796,7 @@ static void create_input_gain_control(
   int               column_num
 ) {
   GtkWidget *w = make_gain_alsa_elem(elem, 0, WIDGET_GAIN_TAPER_LINEAR, 1, TRUE);
+  gate_input_control_on_type(w, elem, INPUT_TYPE_MASK_MIC_INST);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 
@@ -714,6 +836,7 @@ static void create_input_autogain_control(
     "automatically set the gain of the input channel to get the "
     "best signal level."
   );
+  gate_input_control_on_type(w, elem, INPUT_TYPE_MASK_MIC_INST);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
@@ -761,6 +884,198 @@ static void create_input_level_control(
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
 
+static void create_input_input_type_control(
+  struct alsa_elem *elem,
+  GtkWidget        *grid,
+  int               current_row,
+  int               column_num
+) {
+  GtkWidget *w = make_drop_down_alsa_elem(elem, NULL);
+  gtk_widget_add_css_class(w, "input-type");
+  gtk_widget_set_hexpand(w, TRUE);
+  gtk_widget_set_tooltip_text(
+    w,
+    "Select which input (Mic, Line, or Inst) to use for this channel."
+  );
+
+  gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
+}
+
+// The impedance control has five values which are filtered and
+// relabelled according to the channel's input type, matching the
+// hardware: Mic offers Low(0)/110(1)/Med(2)/High(3), Inst offers
+// Low(4)/High(1), and Line has no impedance selection. The firmware
+// does not reject invalid combinations, so the GUI only offers the
+// valid ones.
+
+static const char *impedance_value_names[] = {
+  "Low", "110", "Med", "High", "Inst Low"
+};
+
+static const int mic_impedance_values[] = { 0, 1, 2, 3 };
+static const int inst_impedance_values[] = { 4, 1 };
+
+struct impedance_ctx {
+  struct alsa_elem *elem;
+  struct alsa_elem *input_type_elem;
+};
+
+static void impedance_mode_values(
+  struct impedance_ctx  *ctx,
+  const int            **values,
+  int                   *count
+) {
+  if (alsa_get_elem_value(ctx->input_type_elem) == INPUT_TYPE_INST) {
+    *values = inst_impedance_values;
+    *count = G_N_ELEMENTS(inst_impedance_values);
+  } else {
+    *values = mic_impedance_values;
+    *count = G_N_ELEMENTS(mic_impedance_values);
+  }
+}
+
+static const char *impedance_value_label(int mode, int value) {
+  if (mode == INPUT_TYPE_INST) {
+    if (value == 4)
+      return "Low";
+    if (value == 1)
+      return "High";
+  }
+  return impedance_value_names[value];
+}
+
+static int impedance_value_to_row(int value, void *user_data) {
+  struct impedance_ctx *ctx = user_data;
+
+  const int *values;
+  int count;
+  impedance_mode_values(ctx, &values, &count);
+
+  for (int i = 0; i < count; i++)
+    if (values[i] == value)
+      return i;
+
+  // the extra row refresh_model appends for a value that is invalid
+  // for the current input type
+  return count;
+}
+
+static int impedance_row_to_value(
+  int   row,
+  int   current_value,
+  void *user_data
+) {
+  struct impedance_ctx *ctx = user_data;
+
+  const int *values;
+  int count;
+  impedance_mode_values(ctx, &values, &count);
+
+  // the invalid-value row is a no-op
+  if (row >= count)
+    return current_value;
+
+  return values[row];
+}
+
+static char *impedance_button_label(int value, void *user_data) {
+  struct impedance_ctx *ctx = user_data;
+  int mode = alsa_get_elem_value(ctx->input_type_elem);
+
+  return g_strdup(impedance_value_label(mode, value));
+}
+
+static void impedance_refresh_model(
+  GtkStringList *model,
+  int            value,
+  void          *user_data
+) {
+  struct impedance_ctx *ctx = user_data;
+  int mode = alsa_get_elem_value(ctx->input_type_elem);
+
+  const int *values;
+  int count;
+  impedance_mode_values(ctx, &values, &count);
+
+  gtk_string_list_splice(
+    model, 0, g_list_model_get_n_items(G_LIST_MODEL(model)), NULL
+  );
+  for (int i = 0; i < count; i++)
+    gtk_string_list_append(model, impedance_value_label(mode, values[i]));
+
+  // show a value that is invalid for the current input type rather
+  // than lie about the hardware state
+  if (impedance_value_to_row(value, ctx) == count)
+    gtk_string_list_append(model, impedance_value_names[value]);
+}
+
+static int impedance_sensitive(int value, void *user_data) {
+  struct impedance_ctx *ctx = user_data;
+
+  return alsa_get_elem_value(ctx->input_type_elem) != INPUT_TYPE_LINE;
+}
+
+static const struct drop_down_value_ops impedance_ops = {
+  .value_to_row  = impedance_value_to_row,
+  .row_to_value  = impedance_row_to_value,
+  .button_label  = impedance_button_label,
+  .refresh_model = impedance_refresh_model,
+  .sensitive     = impedance_sensitive
+};
+
+// the impedance presentation depends on the input type, so poke the
+// impedance element's callbacks when the input type changes
+static void impedance_input_type_updated(
+  struct alsa_elem *elem,
+  void             *private
+) {
+  struct impedance_ctx *ctx = private;
+
+  alsa_elem_change(ctx->elem);
+}
+
+static void impedance_destroy(GtkWidget *widget, gpointer user_data) {
+  struct impedance_ctx *ctx = user_data;
+
+  alsa_elem_remove_callbacks_by_data(ctx->input_type_elem, ctx);
+}
+
+static void create_input_impedance_control(
+  struct alsa_elem *elem,
+  GtkWidget        *grid,
+  int               current_row,
+  int               column_num
+) {
+  struct alsa_elem *input_type_elem = get_input_type_elem(elem);
+
+  GtkWidget *w;
+
+  if (input_type_elem) {
+    struct impedance_ctx *ctx = g_malloc0(sizeof(*ctx));
+    ctx->elem = elem;
+    ctx->input_type_elem = input_type_elem;
+
+    w = make_value_mapped_drop_down_alsa_elem(
+      elem, gtk_string_list_new(NULL), &impedance_ops, ctx, g_free
+    );
+    alsa_elem_add_callback(
+      input_type_elem, impedance_input_type_updated, ctx, NULL
+    );
+    g_signal_connect(w, "destroy", G_CALLBACK(impedance_destroy), ctx);
+  } else {
+    w = make_drop_down_alsa_elem(elem, NULL);
+  }
+
+  gtk_widget_add_css_class(w, "impedance");
+  gtk_widget_set_hexpand(w, TRUE);
+  gtk_widget_set_tooltip_text(
+    w,
+    "Select the input impedance for the Mic or Inst input."
+  );
+
+  gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
+}
+
 static void create_input_air_switch_control(
   struct alsa_elem *elem,
   GtkWidget        *grid,
@@ -781,10 +1096,129 @@ static void create_input_air_enum_control(
   int               current_row,
   int               column_num
 ) {
-  GtkWidget *w = make_drop_down_alsa_elem(elem, "Air");
+  GtkWidget *w;
+  const char *descr = air_descr;
+
+  // a two-state air control presents as a toggle button labelled with
+  // the "on" state's name (e.g. "Air", "430"); these are the ISA C8X
+  // air modes, which have their own descriptions
+  if (alsa_get_item_count(elem) == 2) {
+    const char *on_name = alsa_get_item_name(elem, 1);
+
+    w = make_boolean_alsa_elem(elem, on_name, NULL);
+    descr = strcmp(on_name, "430") ? air_isa_descr : air_430_descr;
+  } else {
+    w = make_drop_down_alsa_elem(elem, "Air");
+  }
   gtk_widget_add_css_class(w, "air");
   gtk_widget_set_hexpand(w, TRUE);
-  gtk_widget_set_tooltip_text(w, air_descr);
+  gtk_widget_set_tooltip_text(w, descr);
+  gate_input_control_on_type(w, elem, INPUT_TYPE_MASK_MIC_INST);
+
+  gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
+}
+
+// create a switch button for the given element, paired with a popup
+// level dial if the channel has a matching level control
+static GtkWidget *make_input_switch_with_level(
+  struct alsa_elem *elem,
+  const char       *label,
+  const char       *level_name_format
+) {
+  char level_name[64];
+  snprintf(
+    level_name, sizeof(level_name),
+    level_name_format, get_num_from_string(elem->name)
+  );
+  struct alsa_elem *level_elem =
+    get_elem_by_name(elem->card->elems, level_name);
+
+  if (level_elem)
+    return make_switch_dial_alsa_elem(elem, level_elem, label);
+  return make_boolean_alsa_elem(elem, label, NULL);
+}
+
+static void create_input_console_switch_control(
+  struct alsa_elem *elem,
+  GtkWidget        *grid,
+  int               current_row,
+  int               column_num
+) {
+  GtkWidget *w = make_input_switch_with_level(
+    elem, "Console", "Line In %d Console Level Capture Volume"
+  );
+  gtk_widget_add_css_class(w, "console");
+  gtk_widget_set_hexpand(w, TRUE);
+  gtk_widget_set_tooltip_text(
+    w,
+    "Enabling Console engages an analogue soft-clip circuit in the "
+    "ISA preamp: clean and transparent at lower levels, adding warm "
+    "saturation and low-end punch as you drive the channel harder "
+    "with hotter signals or more gain. The variable control dials in "
+    "the effect amount."
+  );
+
+  gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
+}
+
+// Insert and HPF are icon buttons sharing one cell
+static void create_input_insert_hpf_control(
+  struct alsa_elem *elem,
+  GtkWidget        *grid,
+  int               current_row,
+  int               column_num
+) {
+  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+  gtk_box_set_homogeneous(GTK_BOX(box), TRUE);
+
+  GtkWidget *insert = make_boolean_alsa_elem(elem, "*insert", NULL);
+  gtk_widget_add_css_class(insert, "insert");
+  gtk_widget_set_tooltip_text(
+    insert,
+    "Enable the hardware insert, placing the send/return jacks in "
+    "the signal path for this channel."
+  );
+  gtk_box_append(GTK_BOX(box), insert);
+
+  char hpf_name[64];
+  snprintf(
+    hpf_name, sizeof(hpf_name),
+    "Line In %d HPF Capture Switch",
+    get_num_from_string(elem->name)
+  );
+  struct alsa_elem *hpf_elem =
+    get_elem_by_name(elem->card->elems, hpf_name);
+
+  if (hpf_elem) {
+    GtkWidget *hpf = make_boolean_alsa_elem(hpf_elem, "*hpf", NULL);
+    gtk_widget_add_css_class(hpf, "hpf");
+    gtk_widget_set_tooltip_text(
+      hpf,
+      "Enable the high-pass filter for this channel."
+    );
+    gate_input_control_on_type(hpf, hpf_elem, INPUT_TYPE_MASK_MIC_INST);
+    gtk_box_append(GTK_BOX(box), hpf);
+  }
+
+  gtk_widget_set_hexpand(box, TRUE);
+  gtk_grid_attach(GTK_GRID(grid), box, column_num, current_row, 1, 1);
+}
+
+static void create_input_drive_switch_control(
+  struct alsa_elem *elem,
+  GtkWidget        *grid,
+  int               current_row,
+  int               column_num
+) {
+  GtkWidget *w = make_input_switch_with_level(
+    elem, "Drive", "Line In %d Drive Level Capture Volume"
+  );
+  gtk_widget_add_css_class(w, "drive");
+  gtk_widget_set_hexpand(w, TRUE);
+  gtk_widget_set_tooltip_text(
+    w,
+    "Enable harmonic drive for this channel."
+  );
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
@@ -878,6 +1312,7 @@ static void create_input_phantom_control(
   gtk_widget_add_css_class(w, "phantom");
   gtk_widget_set_hexpand(w, TRUE);
   gtk_widget_set_tooltip_text(w, phantom_descr);
+  gate_input_control_on_type(w, elem, INPUT_TYPE_MASK_MIC);
 
   int from, to;
   get_two_num_from_string(elem->name, &from, &to);
@@ -887,10 +1322,13 @@ static void create_input_phantom_control(
   gtk_grid_attach(GTK_GRID(grid), w, from - 1, current_row, to - from + 1, 1);
 }
 
-static void create_input_controls_by_type(
+// add the widgets for one control type to a row and return how many
+// were added, leaving the row advance to the caller so that multiple
+// control types can share a row
+static int add_input_controls_by_type(
   GPtrArray *elems,
   GtkWidget *grid,
-  int *current_row,
+  int row,
   char *control,
   void (*create_func)(struct alsa_elem *, GtkWidget *, int, int)
 ) {
@@ -906,11 +1344,30 @@ static void create_input_controls_by_type(
     if (!strstr(elem->name, control))
       continue;
 
+    // global controls (e.g. "Autogain Max Gain Capture Volume") have
+    // no channel number and aren't per-input controls
     int column_num = get_num_from_string(elem->name) - 1;
-    create_func(elem, grid, *current_row, column_num);
+    if (column_num < 0)
+      continue;
+
+    create_func(elem, grid, row, column_num);
 
     count++;
   }
+
+  return count;
+}
+
+static void create_input_controls_by_type(
+  GPtrArray *elems,
+  GtkWidget *grid,
+  int *current_row,
+  char *control,
+  void (*create_func)(struct alsa_elem *, GtkWidget *, int, int)
+) {
+  int count = add_input_controls_by_type(
+    elems, grid, *current_row, control, create_func
+  );
 
   // Don't increment row for 4th Gen Solo Inst control so Air control
   // goes next to it
@@ -941,7 +1398,11 @@ static void create_input_controls_by_type_with_card(
     if (!strstr(elem->name, control))
       continue;
 
+    // skip global controls, which have no channel number
     int column_num = get_num_from_string(elem->name) - 1;
+    if (column_num < 0)
+      continue;
+
     create_func(card, elem, grid, *current_row, column_num);
 
     count++;
@@ -949,6 +1410,66 @@ static void create_input_controls_by_type_with_card(
 
   if (count)
     (*current_row)++;
+}
+
+// find the link control for the pair starting at the given channel
+static struct alsa_elem *get_input_link_elem(GPtrArray *elems, int ch) {
+  for (int i = 0; i < elems->len; i++) {
+    struct alsa_elem *elem = g_ptr_array_index(elems, i);
+
+    if (!elem->card)
+      continue;
+    if (!strstr(elem->name, "Link Capture Switch"))
+      continue;
+
+    int from, to;
+    get_two_num_from_string(elem->name, &from, &to);
+    if (from == ch)
+      return elem;
+  }
+
+  return NULL;
+}
+
+// whether an input select enum has an item covering the given line
+// number (item names are e.g. "Input 3" or "Input 1-2")
+static int elem_has_input_item(struct alsa_elem *elem, int line_num) {
+  int count = alsa_get_item_count(elem);
+
+  for (int i = 0; i < count; i++) {
+    int a, b;
+    get_two_num_from_string(alsa_get_item_name(elem, i), &a, &b);
+
+    if ((b == -1 && a == line_num) || (a <= line_num && b >= line_num))
+      return 1;
+  }
+
+  return 0;
+}
+
+// make the channel number widget: a select button bound to whichever
+// input select control covers the channel, or a plain label
+static GtkWidget *make_channel_select_widget(
+  struct alsa_elem *input_select_elem,
+  struct alsa_elem *isa_input_select_elem,
+  struct alsa_elem *link_elem,
+  int               line_num
+) {
+  struct alsa_elem *select_elem = NULL;
+
+  if (input_select_elem &&
+      elem_has_input_item(input_select_elem, line_num))
+    select_elem = input_select_elem;
+  else if (isa_input_select_elem &&
+           elem_has_input_item(isa_input_select_elem, line_num))
+    select_elem = isa_input_select_elem;
+
+  if (select_elem)
+    return make_input_select_alsa_elem(select_elem, link_elem, line_num);
+
+  char s[20];
+  snprintf(s, 20, "%d", line_num);
+  return gtk_label_new(s);
 }
 
 static void create_input_controls(
@@ -965,6 +1486,8 @@ static void create_input_controls(
 
   struct alsa_elem *input_select_elem =
     get_elem_by_name(elems, "Input Select Capture Enum");
+  struct alsa_elem *isa_input_select_elem =
+    get_elem_by_name(elems, "ISA Input Select Capture Enum");
 
   GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
 
@@ -983,17 +1506,40 @@ static void create_input_controls(
 
   gtk_grid_attach(GTK_GRID(top), box, *x, 0, 1, 1);
 
+  // Each linkable pair shares one two-column cell: [1][link][2], with
+  // a chain-icon link toggle between the channel select buttons
   for (int i = 1; i <= input_count; i++) {
-    GtkWidget *label;
+    struct alsa_elem *link_elem =
+      (i % 2) ? get_input_link_elem(elems, i) : NULL;
 
-    if (input_select_elem) {
-      label = make_input_select_alsa_elem(input_select_elem, i);
+    GtkWidget *sel = make_channel_select_widget(
+      input_select_elem, isa_input_select_elem, link_elem, i
+    );
+
+    if (link_elem && i < input_count) {
+      GtkWidget *sel2 = make_channel_select_widget(
+        input_select_elem, isa_input_select_elem, link_elem, i + 1
+      );
+
+      GtkWidget *link =
+        make_boolean_alsa_elem(link_elem, "*link-broken", "*link");
+      gtk_widget_add_css_class(link, "input-link");
+      gtk_widget_add_css_class(link, "flat");
+      gtk_widget_set_tooltip_text(link, "Link as stereo pair");
+
+      gtk_widget_set_hexpand(sel, TRUE);
+      gtk_widget_set_hexpand(sel2, TRUE);
+
+      GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+      gtk_box_append(GTK_BOX(box), sel);
+      gtk_box_append(GTK_BOX(box), link);
+      gtk_box_append(GTK_BOX(box), sel2);
+      gtk_grid_attach(GTK_GRID(input_grid), box, i - 1, 0, 2, 1);
+
+      i++;
     } else {
-      char s[20];
-      snprintf(s, 20, "%d", i);
-      label = gtk_label_new(s);
+      gtk_grid_attach(GTK_GRID(input_grid), sel, i - 1, 0, 1, 1);
     }
-    gtk_grid_attach(GTK_GRID(input_grid), label, i - 1, 0, 1, 1);
   }
 
   int current_row = 1;
@@ -1021,7 +1567,11 @@ static void create_input_controls(
 
   create_input_controls_by_type(
     elems, input_grid, &current_row,
-    "Link Capture Switch", create_input_link_control
+    "Input Type Capture Enum", create_input_input_type_control
+  );
+  create_input_controls_by_type(
+    elems, input_grid, &current_row,
+    "Impedance Capture Enum", create_input_impedance_control
   );
   create_input_controls_by_type_with_card(
     card, elems, input_grid, &current_row,
@@ -1054,6 +1604,23 @@ static void create_input_controls(
   create_input_controls_by_type(
     elems, input_grid, &current_row,
     "Air Capture Enum", create_input_air_enum_control
+  );
+  // Console (channels 1-2) and Drive (channels 3-8) share a row
+  {
+    int count = add_input_controls_by_type(
+      elems, input_grid, current_row,
+      "Console Capture Switch", create_input_console_switch_control
+    );
+    count += add_input_controls_by_type(
+      elems, input_grid, current_row,
+      "Drive Capture Switch", create_input_drive_switch_control
+    );
+    if (count)
+      current_row++;
+  }
+  create_input_controls_by_type(
+    elems, input_grid, &current_row,
+    "Insert Capture Switch", create_input_insert_hpf_control
   );
   create_input_controls_by_type(
     elems, input_grid, &current_row,
@@ -1354,6 +1921,7 @@ static void create_global_controls(
   add_speaker_switching_controls_enum(card, column[0]);
   add_speaker_switching_controls_switches(card, column[0]);
   add_speaker_switching_controls_gen4(card, column[0]);
+  add_monitor_group_enum_control(card, column[0]);
   add_talkback_controls_enum(card, column[1]);
   add_talkback_controls_switches(card, column[1]);
 

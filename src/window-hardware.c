@@ -64,6 +64,11 @@ struct hw_info clarett_plus_info[] = {
   { }
 };
 
+struct hw_info isa_info[] = {
+  { "ISA C8X" },
+  { }
+};
+
 struct hw_info vocaster_info[] = {
   { "Vocaster One" },
   { "Vocaster Two" },
@@ -88,6 +93,9 @@ struct hw_cat hw_cat[] = {
   },
   { "Clarett+",
     clarett_plus_info
+  },
+  { "ISA",
+    isa_info
   },
   { "Vocaster",
     vocaster_info

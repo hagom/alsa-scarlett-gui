@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023-2025 Geoffrey D. Bennett <g@b4.vu>
+// SPDX-FileCopyrightText: 2023-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
@@ -32,6 +32,7 @@
 #define PID_SCARLETT_GEN4_16I16  0x821b
 #define PID_SCARLETT_GEN4_18I16  0x821c
 #define PID_SCARLETT_GEN4_18I20  0x821d
+#define PID_ISA_C8X              0x821e
 
 // Supported devices
 struct scarlett2_device {

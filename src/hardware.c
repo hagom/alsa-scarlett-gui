@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023-2025 Geoffrey D. Bennett <g@b4.vu>
+// SPDX-FileCopyrightText: 2023-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <stddef.h>
@@ -29,6 +29,7 @@ struct scarlett2_device scarlett2_supported[] = {
   { PID_CLARETT_PLUS_2PRE,   "Clarett+ 2Pre" },
   { PID_CLARETT_PLUS_4PRE,   "Clarett+ 4Pre" },
   { PID_CLARETT_PLUS_8PRE,   "Clarett+ 8Pre" },
+  { PID_ISA_C8X,             "ISA C8X" },
   { 0, NULL }
 };
 

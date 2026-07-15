@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
+// SPDX-FileCopyrightText: 2022-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <stddef.h>
@@ -515,6 +515,35 @@ static const char *scarlett_gen4_18i20_analogue_snk_pairs[] = {
   "Headphones 1", "Headphones 2", NULL
 };
 
+// ISA C8X analogue inputs (sources)
+static const char *isa_c8x_analogue_src[] = {
+  "Mic/Line/Inst 1", "Mic/Line/Inst 2",
+  "Mic/Line 3", "Mic/Line 4",
+  "Mic/Line 5", "Mic/Line 6",
+  "Mic/Line 7", "Mic/Line 8",
+  "Talkback Mic",
+  NULL
+};
+
+// ISA C8X analogue outputs (sinks)
+static const char *isa_c8x_analogue_snk[] = {
+  "Line 1", "Line 2",
+  "Line 3", "Line 4",
+  "Line 5", "Line 6",
+  "Line 7", "Line 8",
+  "Line 9", "Line 10",
+  "Line 11", "Line 12",
+  "Headphones 1 (L)", "Headphones 1 (R)",
+  "Headphones 2 (L)", "Headphones 2 (R)",
+  NULL
+};
+
+// ISA C8X analogue output pairs
+static const char *isa_c8x_analogue_snk_pairs[] = {
+  "Line 1–2", "Line 3–4", "Line 5–6", "Line 7–8", "Line 9–10",
+  "Line 11–12", "Headphones 1", "Headphones 2", NULL
+};
+
 // Analogue input (source) pair names
 
 // Mic/Line/Inst 1–2 only
@@ -667,6 +696,10 @@ static const struct device_pair_names device_pair_names[] = {
   { PID_SCARLETT_GEN4_18I20, PC_HW, HW_TYPE_ANALOGUE, 0, analogue_src_pairs_inst_12_mic_345678 },
   { PID_SCARLETT_GEN4_18I20, PC_HW, HW_TYPE_ANALOGUE, 1, scarlett_gen4_18i20_analogue_snk_pairs },
 
+  // ISA C8X
+  { PID_ISA_C8X, PC_HW, HW_TYPE_ANALOGUE, 0, analogue_src_pairs_inst_12_mic_345678 },
+  { PID_ISA_C8X, PC_HW, HW_TYPE_ANALOGUE, 1, isa_c8x_analogue_snk_pairs },
+
   { 0 }
 };
 
@@ -782,6 +815,10 @@ static const struct device_port_names device_port_names[] = {
   // Scarlett 4th Gen 18i20
   { PID_SCARLETT_GEN4_18I20, PC_HW,  HW_TYPE_ANALOGUE, 0, scarlett_gen4_18i20_analogue_src },
   { PID_SCARLETT_GEN4_18I20, PC_HW,  HW_TYPE_ANALOGUE, 1, scarlett_gen4_18i20_analogue_snk },
+
+  // ISA C8X
+  { PID_ISA_C8X, PC_HW,  HW_TYPE_ANALOGUE, 0, isa_c8x_analogue_src },
+  { PID_ISA_C8X, PC_HW,  HW_TYPE_ANALOGUE, 1, isa_c8x_analogue_snk },
 
   { 0 }
 };

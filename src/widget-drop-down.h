@@ -39,12 +39,29 @@ struct drop_down_value_ops {
   // element writability to set button sensitivity). May be NULL if the
   // control is always applicable.
   int (*sensitive)(int value, void *user_data);
+
+  // Return whether a row can be reached by clicking the cycle button
+  // (see make_cycle_drop_down_alsa_elem). Rows that return 0 are still
+  // selectable from the drop-down list. May be NULL if every row is
+  // reachable.
+  int (*row_enabled)(int row, void *user_data);
 };
 
 // Build a drop-down that decouples the ALSA element value from the row
 // index. The widget takes ownership of model and frees user_data with
 // user_data_free on destruction (user_data_free may be NULL).
 GtkWidget *make_value_mapped_drop_down_alsa_elem(
+  struct alsa_elem                 *elem,
+  GtkStringList                    *model,
+  const struct drop_down_value_ops *ops,
+  void                             *user_data,
+  GDestroyNotify                    user_data_free
+);
+
+// Build a value-mapped drop-down whose main button cycles to the next
+// enabled row on click, with an arrow button beside it that opens the
+// list to pick a particular row. Ownership as above.
+GtkWidget *make_cycle_drop_down_alsa_elem(
   struct alsa_elem                 *elem,
   GtkStringList                    *model,
   const struct drop_down_value_ops *ops,
