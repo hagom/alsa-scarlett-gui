@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
+// SPDX-FileCopyrightText: 2022-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <gtk/gtk.h>
@@ -334,10 +334,13 @@ void create_card_window(struct alsa_card *card) {
 
   restore_window_visibility(card);
 
-  gtk_window_set_child(
-    GTK_WINDOW(card->window_main),
-    card->window_main_contents
-  );
+  // overlay so that pop-up controls (e.g. level dials) can float in
+  // the main window surface, where drags keep tracking outside the
+  // pop-up (a GtkPopover is a separate surface and its drag gestures
+  // are cancelled when the pointer leaves it)
+  GtkWidget *overlay = gtk_overlay_new();
+  gtk_overlay_set_child(GTK_OVERLAY(overlay), card->window_main_contents);
+  gtk_window_set_child(GTK_WINDOW(card->window_main), overlay);
 
   // register callback to update window titles when name changes
   struct alsa_elem *name_elem = optional_controls_get_name_elem(card);
