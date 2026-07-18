@@ -165,6 +165,10 @@ static void cleanup_subwindows(struct alsa_card *card) {
     gtk_window_destroy(GTK_WINDOW(card->window_dsp));
     card->window_dsp = NULL;
   }
+  if (card->window_preferences) {
+    gtk_window_destroy(GTK_WINDOW(card->window_preferences));
+    card->window_preferences = NULL;
+  }
 }
 
 // Handle main window close - clean up before window is destroyed
