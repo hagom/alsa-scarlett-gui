@@ -1038,6 +1038,7 @@ static void impedance_destroy(GtkWidget *widget, gpointer user_data) {
   struct impedance_ctx *ctx = user_data;
 
   alsa_elem_remove_callbacks_by_data(ctx->input_type_elem, ctx);
+  g_free(ctx);
 }
 
 static void create_input_impedance_control(
@@ -1056,7 +1057,7 @@ static void create_input_impedance_control(
     ctx->input_type_elem = input_type_elem;
 
     w = make_value_mapped_drop_down_alsa_elem(
-      elem, gtk_string_list_new(NULL), &impedance_ops, ctx, g_free
+      elem, gtk_string_list_new(NULL), &impedance_ops, ctx, NULL
     );
     alsa_elem_add_callback(
       input_type_elem, impedance_input_type_updated, ctx, NULL
