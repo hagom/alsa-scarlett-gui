@@ -31,9 +31,16 @@ struct gain {
   struct alsa_elem *elems[MAX_STEREO_GAIN_ELEMS];
   int               elem_count;
   int               syncing;  // flag to prevent infinite callback loops
+  int               updating; // dial is being set from an ALSA update
 };
 
 static void gain_changed(GtkWidget *widget, struct gain *data) {
+
+  // Ignore dial changes caused by gain_updated() setting the dial
+  // from an ALSA update; writing the value back is redundant
+  if (data->updating)
+    return;
+
   int value = gtk_dial_get_value(GTK_DIAL(data->dial));
 
   // Stereo widget: set all controlled elements
@@ -98,7 +105,9 @@ static void gain_updated(
     data->syncing = 0;
   }
 
+  data->updating = 1;
   gtk_dial_set_value(GTK_DIAL(data->dial), alsa_value);
+  data->updating = 0;
 
   char s[20];
   char *p = s;
