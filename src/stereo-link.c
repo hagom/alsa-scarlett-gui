@@ -564,6 +564,36 @@ static int is_valid_stereo_src_connection(
   return src_l_routes_to_snk_l && src_r_routes_to_snk_r;
 }
 
+// Clear a sink's monitor group sources that reference either channel
+// of a source pair (for sinks whose routing to the pair is invalid;
+// the normal routing enum is not effective for sinks in a monitor
+// group, so the group sources must be cleared as well)
+static void clear_snk_mg_sources_for_pair(
+  struct routing_snk *snk,
+  struct routing_src *src_l,
+  struct routing_src *src_r
+) {
+  struct alsa_card *card = snk->elem->card;
+
+  if (!card->monitor_group_src_map)
+    return;
+
+  for (int g = 0; g < card->monitor_group_count; g++) {
+    struct alsa_elem *source = snk->monitor_groups[g].source;
+
+    if (!source)
+      continue;
+
+    int enum_val = alsa_get_elem_value(source);
+    if (enum_val < 0 || enum_val >= card->monitor_group_src_map_count)
+      continue;
+
+    int src_idx = card->monitor_group_src_map[enum_val];
+    if (src_idx == src_l->id || src_idx == src_r->id)
+      alsa_set_elem_value(source, 0);
+  }
+}
+
 // Find all sinks receiving from a source pair and validate routing
 static void validate_src_pair_routing(
   struct routing_src *src_l,
@@ -601,9 +631,29 @@ static void validate_src_pair_routing(
     struct routing_snk *snk_r = snk_is_left ? snk_partner : snk;
 
     if (!is_valid_stereo_src_connection(src_l, src_r, snk_l, snk_r)) {
-      // Invalid routing - clear both channels
-      alsa_set_elem_value(snk_l->elem, 0);
-      alsa_set_elem_value(snk_r->elem, 0);
+      int mono_fan =
+        snk_l->effective_source_idx == snk_r->effective_source_idx;
+
+      if (mono_fan) {
+        // A sink pair fed mono from one channel of the pair: convert
+        // to the stereo-aware L→L / R→R connection and link the sink
+        // pair. Monitor group sources are remapped by
+        // resync_monitor_group_sources()
+        if (!snk_in_any_monitor_group(snk_l)) {
+          alsa_set_elem_value(snk_l->elem, src_l->id);
+          alsa_set_elem_value(snk_r->elem, src_r->id);
+        }
+
+        struct alsa_elem *snk_link_elem = get_snk_link_elem(snk_l);
+        if (snk_link_elem && !alsa_get_elem_value(snk_link_elem))
+          alsa_set_elem_value(snk_link_elem, 1);
+      } else {
+        // Invalid routing - clear both channels
+        alsa_set_elem_value(snk_l->elem, 0);
+        alsa_set_elem_value(snk_r->elem, 0);
+        clear_snk_mg_sources_for_pair(snk_l, src_l, src_r);
+        clear_snk_mg_sources_for_pair(snk_r, src_l, src_r);
+      }
     } else {
       // Valid stereo connection - propagate link to sink pair
       struct alsa_elem *snk_link_elem = get_snk_link_elem(snk_l);
