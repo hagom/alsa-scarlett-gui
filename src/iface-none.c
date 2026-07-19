@@ -29,6 +29,17 @@ GtkWidget *create_window_iface_none(GtkApplication *app) {
   add_window_action_map(GTK_WINDOW(w));
   if (!alsa_has_reopen_callbacks()) {
     gtk_widget_set_visible(w, TRUE);
+  } else {
+
+    // Workaround: the window is kept hidden while waiting for a
+    // rebooting device to return, but destroying a never-realised
+    // application window crashes GTK 4.22 on Wayland
+    // (gtk_application_impl_wayland_window_forget() passes the
+    // window's NULL surface to
+    // gdk_wayland_toplevel_remove_from_session()). Fixed in GTK
+    // 4.23 by commit 221cd8e190; remove this realise call once the
+    // flatpak runtime ships a GTK with that fix.
+    gtk_widget_realize(w);
   }
 
   return w;
