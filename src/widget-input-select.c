@@ -6,7 +6,8 @@
 
 struct input_select {
   struct alsa_elem *elem;
-  struct alsa_elem *link_elem;
+  struct alsa_elem *hw_link_elem;   // device link: gangs the selection
+  struct alsa_elem *gui_link_elem;  // GUI link: pair collapsed to one button
   GtkWidget        *button;
   int               line_num;
 };
@@ -53,14 +54,28 @@ static void input_select_updated(
   int is_writable = alsa_get_elem_writable(data->elem);
 
   int active = selection_covers_line(data->elem, line_num);
+  int hw_linked =
+    data->hw_link_elem && alsa_get_elem_value(data->hw_link_elem);
+  int gui_linked =
+    data->gui_link_elem && alsa_get_elem_value(data->gui_link_elem);
 
-  // when the pair is stereo-linked, both channels light up whichever
+  // when the device gangs the pair, both channels light up whichever
   // of the two the underlying selection points at
-  if (!active && data->link_elem &&
-      alsa_get_elem_value(data->link_elem)) {
+  if (!active && hw_linked) {
     int partner = (line_num % 2) ? line_num + 1 : line_num - 1;
 
     active = selection_covers_line(data->elem, partner);
+  }
+
+  // the left button of a collapsed GUI-linked pair shows the pair range
+  if (line_num % 2) {
+    char s[30];
+
+    if (gui_linked)
+      snprintf(s, sizeof(s), "%d–%d", line_num, line_num + 1);
+    else
+      snprintf(s, sizeof(s), "%d", line_num);
+    gtk_button_set_label(GTK_BUTTON(data->button), s);
   }
 
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(data->button), active);
@@ -69,12 +84,14 @@ static void input_select_updated(
 
 GtkWidget *make_input_select_alsa_elem(
   struct alsa_elem *elem,
-  struct alsa_elem *link_elem,
+  struct alsa_elem *hw_link_elem,
+  struct alsa_elem *gui_link_elem,
   int               line_num
 ) {
   struct input_select *data = malloc(sizeof(struct input_select));
   data->elem = elem;
-  data->link_elem = link_elem;
+  data->hw_link_elem = hw_link_elem;
+  data->gui_link_elem = gui_link_elem;
   data->button = gtk_toggle_button_new();
   data->line_num = line_num;
 
@@ -88,8 +105,10 @@ GtkWidget *make_input_select_alsa_elem(
     data->button, "clicked", G_CALLBACK(input_select_clicked), data
   );
   alsa_elem_add_callback(elem, input_select_updated, data, NULL);
-  if (link_elem)
-    alsa_elem_add_callback(link_elem, input_select_updated, data, NULL);
+  if (hw_link_elem)
+    alsa_elem_add_callback(hw_link_elem, input_select_updated, data, NULL);
+  if (gui_link_elem)
+    alsa_elem_add_callback(gui_link_elem, input_select_updated, data, NULL);
 
   input_select_updated(elem, data);
 

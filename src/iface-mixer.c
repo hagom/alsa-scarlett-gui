@@ -8,6 +8,7 @@
 #include "presets.h"
 #include "window-preferences.h"
 #include "routing-lines.h"
+#include "stereo-link.h"
 #include "stringhelper.h"
 #include "tooltips.h"
 #include "widget-boolean.h"
@@ -1312,7 +1313,6 @@ static void create_input_phantom_control(
 ) {
   GtkWidget *w = make_boolean_alsa_elem(elem, "48V", NULL);
   gtk_widget_add_css_class(w, "phantom");
-  gtk_widget_set_hexpand(w, TRUE);
   gtk_widget_set_tooltip_text(w, phantom_descr);
   gate_input_control_on_type(w, elem, INPUT_TYPE_MASK_MIC);
 
@@ -1414,25 +1414,6 @@ static void create_input_controls_by_type_with_card(
     (*current_row)++;
 }
 
-// find the link control for the pair starting at the given channel
-static struct alsa_elem *get_input_link_elem(GPtrArray *elems, int ch) {
-  for (int i = 0; i < elems->len; i++) {
-    struct alsa_elem *elem = g_ptr_array_index(elems, i);
-
-    if (!elem->card)
-      continue;
-    if (!strstr(elem->name, "Link Capture Switch"))
-      continue;
-
-    int from, to;
-    get_two_num_from_string(elem->name, &from, &to);
-    if (from == ch)
-      return elem;
-  }
-
-  return NULL;
-}
-
 // whether an input select enum has an item covering the given line
 // number (item names are e.g. "Input 3" or "Input 1-2")
 static int elem_has_input_item(struct alsa_elem *elem, int line_num) {
@@ -1454,7 +1435,8 @@ static int elem_has_input_item(struct alsa_elem *elem, int line_num) {
 static GtkWidget *make_channel_select_widget(
   struct alsa_elem *input_select_elem,
   struct alsa_elem *isa_input_select_elem,
-  struct alsa_elem *link_elem,
+  struct alsa_elem *hw_link_elem,
+  struct alsa_elem *gui_link_elem,
   int               line_num
 ) {
   struct alsa_elem *select_elem = NULL;
@@ -1467,11 +1449,289 @@ static GtkWidget *make_channel_select_widget(
     select_elem = isa_input_select_elem;
 
   if (select_elem)
-    return make_input_select_alsa_elem(select_elem, link_elem, line_num);
+    return make_input_select_alsa_elem(
+      select_elem, hw_link_elem, gui_link_elem, line_num
+    );
 
   char s[20];
   snprintf(s, 20, "%d", line_num);
   return gtk_label_new(s);
+}
+
+// find the mute control for the given input channel
+static struct alsa_elem *get_input_mute_elem(GPtrArray *elems, int ch) {
+  for (int i = 0; i < elems->len; i++) {
+    struct alsa_elem *elem = g_ptr_array_index(elems, i);
+
+    if (!elem->card)
+      continue;
+    if (!strstr(elem->name, "Mute Capture Switch"))
+      continue;
+    if (get_num_from_string(elem->name) == ch)
+      return elem;
+  }
+
+  return NULL;
+}
+
+// Main-window channel strip visibility for the analogue input and
+// output grids. A strip covers one channel, or a pair of adjacent
+// channels when the channels are linkable.
+//
+// A channel disabled in the I/O configuration has its strip hidden.
+// A linked pair collapses to a single strip: the right channel's
+// widgets are hidden and the left channel's widgets span both
+// columns. Inputs collapse on the device's own link switch (the
+// device gangs the controls of a linked pair, so the left channel's
+// controls are authoritative); outputs collapse on the GUI stereo
+// link, with volume and mute ganged in software.
+struct io_strip {
+  GtkWidget        *grid;
+  GPtrArray        *left;        // control widgets per row, left channel
+  GPtrArray        *right;       // control widgets per row, right channel
+  GtkWidget        *box;         // row-0 shared pair box (inputs), or NULL
+  GtkWidget        *head_l;      // row-0 channel widget, left
+  GtkWidget        *head_r;      // row-0 channel widget, right
+  GtkWidget        *link_widget;   // chain-icon device link toggle, or NULL
+  struct alsa_elem *hw_link_elem;  // device link, NULL if none
+  struct alsa_elem *gui_link_elem; // GUI link, NULL if not a linkable pair
+  struct alsa_elem *enable_l;      // I/O config enable, NULL if none
+  struct alsa_elem *enable_r;
+  int               num_l;       // channel number (for label text)
+};
+
+static void set_io_grid_span(GtkWidget *grid, GtkWidget *child, int span) {
+  GtkLayoutManager *lm = gtk_widget_get_layout_manager(grid);
+  GtkGridLayoutChild *lc =
+    GTK_GRID_LAYOUT_CHILD(gtk_layout_manager_get_layout_child(lm, child));
+
+  gtk_grid_layout_child_set_column_span(lc, span);
+}
+
+static void io_strip_updated(struct alsa_elem *elem, void *private) {
+  struct io_strip *d = private;
+
+  int hw_linked =
+    d->hw_link_elem && alsa_get_elem_value(d->hw_link_elem);
+  int gui_linked =
+    d->gui_link_elem && alsa_get_elem_value(d->gui_link_elem);
+
+  // the device gangs the controls of a hw-linked pair, so one column
+  // of controls suffices even when the pair is not GUI-linked
+  int collapsed = hw_linked || gui_linked;
+
+  int en_l = !d->enable_l || alsa_get_elem_value(d->enable_l);
+  int en_r = !d->enable_r || alsa_get_elem_value(d->enable_r);
+
+  // a collapsed pair follows the left channel's enable state
+  int show_l = en_l;
+  int show_r = en_r && !collapsed;
+  int show_head_r = en_r && !gui_linked;
+
+  for (int i = 0; i < d->left->len; i++) {
+    GtkWidget *l = g_ptr_array_index(d->left, i);
+    GtkWidget *r = g_ptr_array_index(d->right, i);
+
+    if (l) {
+      gtk_widget_set_visible(l, show_l);
+      if (r)
+        set_io_grid_span(d->grid, l, collapsed ? 2 : 1);
+    }
+    if (r)
+      gtk_widget_set_visible(r, show_r);
+  }
+
+  if (d->head_l) {
+    gtk_widget_set_visible(d->head_l, show_l);
+
+    // heads placed directly in the grid span the collapsed pair;
+    // heads in a shared pair box fill it by hiding their neighbours
+    if (!d->box && d->head_r)
+      set_io_grid_span(d->grid, d->head_l, gui_linked ? 2 : 1);
+
+    // number labels show the pair range when collapsed
+    if (GTK_IS_LABEL(d->head_l)) {
+      char s[20];
+
+      if (gui_linked)
+        snprintf(s, 20, "%d–%d", d->num_l, d->num_l + 1);
+      else
+        snprintf(s, 20, "%d", d->num_l);
+      gtk_label_set_text(GTK_LABEL(d->head_l), s);
+    }
+  }
+  if (d->head_r)
+    gtk_widget_set_visible(d->head_r, show_head_r);
+  if (d->link_widget)
+    gtk_widget_set_visible(d->link_widget, en_l && en_r && !gui_linked);
+  if (d->box)
+    gtk_widget_set_visible(d->box, en_l || en_r);
+}
+
+static void io_strip_free(void *p) {
+  struct io_strip *d = p;
+
+  g_ptr_array_free(d->left, TRUE);
+  g_ptr_array_free(d->right, TRUE);
+  g_free(d);
+}
+
+// Register the strip update on all elements that affect it and apply
+// the initial state
+static void register_io_strip(struct io_strip *d) {
+  int owner = 1;
+  struct alsa_elem *elems[4] =
+    { d->hw_link_elem, d->gui_link_elem, d->enable_l, d->enable_r };
+
+  for (int i = 0; i < 4; i++) {
+    if (!elems[i])
+      continue;
+    alsa_elem_add_callback(
+      elems[i], io_strip_updated, d, owner ? io_strip_free : NULL
+    );
+    owner = 0;
+  }
+
+  if (owner) {
+    io_strip_free(d);
+    return;
+  }
+
+  io_strip_updated(NULL, d);
+}
+
+// While a pair is linked, gang a pair of controls the device doesn't
+// gang itself (input mute; output volume and mute) in software
+struct pair_elem_sync {
+  struct alsa_elem *link_elem;
+  struct alsa_elem *from;
+  struct alsa_elem *to;
+};
+
+static void pair_elem_sync_updated(struct alsa_elem *elem, void *private) {
+  struct pair_elem_sync *d = private;
+
+  if (!alsa_get_elem_value(d->link_elem))
+    return;
+
+  long value = alsa_get_elem_value(d->from);
+  if (alsa_get_elem_value(d->to) != value)
+    alsa_set_elem_value(d->to, value);
+}
+
+static void register_pair_elem_sync(
+  struct alsa_elem *link_elem,
+  struct alsa_elem *left,
+  struct alsa_elem *right
+) {
+  if (!left || !right)
+    return;
+
+  struct pair_elem_sync *data = g_malloc(sizeof(*data));
+  data->link_elem = link_elem;
+  data->from = left;
+  data->to = right;
+
+  alsa_elem_add_callback(left, pair_elem_sync_updated, data, g_free);
+
+  // left→right also fires on link change so the pair converges on
+  // the left channel's state when linked
+  alsa_elem_add_callback(link_elem, pair_elem_sync_updated, data, NULL);
+  pair_elem_sync_updated(left, data);
+
+  data = g_malloc(sizeof(*data));
+  data->link_elem = link_elem;
+  data->from = right;
+  data->to = left;
+
+  alsa_elem_add_callback(right, pair_elem_sync_updated, data, g_free);
+}
+
+// find the routing source for an analogue input by channel number
+static struct routing_src *get_analogue_input_src(
+  struct alsa_card *card,
+  int               lr_num
+) {
+  for (int i = 0; i < card->routing_srcs->len; i++) {
+    struct routing_src *src = &g_array_index(
+      card->routing_srcs, struct routing_src, i
+    );
+
+    if (src->port_category == PC_HW &&
+        src->hw_type == HW_TYPE_ANALOGUE &&
+        src->lr_num == lr_num)
+      return src;
+  }
+  return NULL;
+}
+
+static void setup_input_strips(
+  struct alsa_card *card,
+  GtkWidget        *grid,
+  int               rows,
+  int               input_count
+) {
+  GPtrArray *elems = card->elems;
+
+  for (int i = 1; i <= input_count; i++) {
+    struct routing_src *src_l = get_analogue_input_src(card, i);
+    struct routing_src *src_r =
+      (i % 2) && i < input_count
+        ? get_analogue_input_src(card, i + 1) : NULL;
+    struct alsa_elem *link_elem =
+      src_l && src_r ? src_l->link_elem : NULL;
+    int is_pair = !!link_elem;
+
+    if (!is_pair)
+      src_r = NULL;
+
+    struct io_strip *d = g_malloc0(sizeof(*d));
+    d->grid = grid;
+    d->left = g_ptr_array_new();
+    d->right = g_ptr_array_new();
+    d->hw_link_elem = is_pair ? get_device_link_elem(elems, i) : NULL;
+    d->gui_link_elem = link_elem;
+    d->enable_l = src_l ? src_l->enable_elem : NULL;
+    d->enable_r = src_r ? src_r->enable_elem : NULL;
+    d->num_l = i;
+
+    // pairs with a device link switch share a row-0 box holding
+    // [select][chain][select]; otherwise heads sit in the grid
+    GtkWidget *head = gtk_grid_get_child_at(GTK_GRID(grid), i - 1, 0);
+    if (is_pair && GTK_IS_BOX(head)) {
+      d->box = head;
+      d->head_l = gtk_widget_get_first_child(head);
+      d->link_widget = gtk_widget_get_next_sibling(d->head_l);
+      d->head_r = gtk_widget_get_next_sibling(d->link_widget);
+    } else {
+      d->head_l = head;
+      d->head_r =
+        is_pair ? gtk_grid_get_child_at(GTK_GRID(grid), i, 0) : NULL;
+    }
+
+    for (int row = 1; row < rows; row++) {
+      g_ptr_array_add(
+        d->left, gtk_grid_get_child_at(GTK_GRID(grid), i - 1, row)
+      );
+      g_ptr_array_add(
+        d->right,
+        is_pair ? gtk_grid_get_child_at(GTK_GRID(grid), i, row) : NULL
+      );
+    }
+
+    register_io_strip(d);
+
+    if (is_pair) {
+      // the device gangs everything of a hw-linked pair except mute
+      if (d->hw_link_elem)
+        register_pair_elem_sync(
+          d->hw_link_elem,
+          get_input_mute_elem(elems, i),
+          get_input_mute_elem(elems, i + 1)
+        );
+      i++;
+    }
+  }
 }
 
 static void create_input_controls(
@@ -1500,7 +1760,13 @@ static void create_input_controls(
 
   GtkWidget *input_grid = gtk_grid_new();
   gtk_widget_add_css_class(input_grid, "controls-content");
-  gtk_grid_set_spacing(GTK_GRID(input_grid), 10);
+  gtk_widget_add_css_class(input_grid, "packed-columns");
+  // column spacing comes from each control's own horizontal margins
+  // (see .packed-columns in the CSS) so that columns left empty by a
+  // disabled input collapse fully, taking their spacing with them,
+  // rather than being held open by a control that spans across them
+  gtk_grid_set_row_spacing(GTK_GRID(input_grid), 10);
+  gtk_grid_set_column_spacing(GTK_GRID(input_grid), 0);
   gtk_widget_set_hexpand(input_grid, TRUE);
   gtk_widget_set_halign(input_grid, GTK_ALIGN_FILL);
   gtk_widget_set_vexpand(input_grid, TRUE);
@@ -1509,22 +1775,30 @@ static void create_input_controls(
   gtk_grid_attach(GTK_GRID(top), box, *x, 0, 1, 1);
 
   // Each linkable pair shares one two-column cell: [1][link][2], with
-  // a chain-icon link toggle between the channel select buttons
+  // a chain-icon toggle for the device link between the channel select
+  // buttons. When the pair is GUI-linked, the chain and right button
+  // hide and the left button shows the pair range.
   for (int i = 1; i <= input_count; i++) {
-    struct alsa_elem *link_elem =
-      (i % 2) ? get_input_link_elem(elems, i) : NULL;
+    struct alsa_elem *hw_link_elem =
+      (i % 2) && i < input_count ? get_device_link_elem(elems, i) : NULL;
+    struct routing_src *src_l =
+      (i % 2) && i < input_count
+        ? get_analogue_input_src(card, i) : NULL;
+    struct alsa_elem *gui_link_elem = src_l ? src_l->link_elem : NULL;
 
     GtkWidget *sel = make_channel_select_widget(
-      input_select_elem, isa_input_select_elem, link_elem, i
+      input_select_elem, isa_input_select_elem,
+      hw_link_elem, gui_link_elem, i
     );
 
-    if (link_elem && i < input_count) {
+    if (hw_link_elem) {
       GtkWidget *sel2 = make_channel_select_widget(
-        input_select_elem, isa_input_select_elem, link_elem, i + 1
+        input_select_elem, isa_input_select_elem,
+        hw_link_elem, gui_link_elem, i + 1
       );
 
       GtkWidget *link =
-        make_boolean_alsa_elem(link_elem, "*link-broken", "*link");
+        make_boolean_alsa_elem(hw_link_elem, "*link-broken", "*link");
       gtk_widget_add_css_class(link, "input-link");
       gtk_widget_add_css_class(link, "flat");
       gtk_widget_set_tooltip_text(link, "Link as stereo pair");
@@ -1653,7 +1927,67 @@ static void create_input_controls(
     "Phantom Power Capture Switch", create_input_phantom_control
   );
 
+  setup_input_strips(card, input_grid, current_row, input_count);
+
   (*x)++;
+}
+
+// Output strips: rows 1-5 of the output grid (monitor group label,
+// volume, mute, SW/HW). Pairs collapse on the GUI stereo link with
+// volume, mute, and SW/HW ganged in software, since the device has no
+// output link switch.
+static void setup_output_strips(
+  struct alsa_card  *card,
+  GtkWidget         *grid,
+  int                line_1_col,
+  int                output_count,
+  struct alsa_elem **vol_elems,
+  struct alsa_elem **mute_elems,
+  struct alsa_elem **sw_hw_elems
+) {
+  for (int i = 1; i <= output_count; i++) {
+    struct routing_snk *snk_l = get_analogue_output_snk(card, i);
+    struct routing_snk *snk_r =
+      i < output_count ? get_analogue_output_snk(card, i + 1) : NULL;
+    int is_pair = (i % 2) && snk_l && snk_l->link_elem && snk_r;
+    int col = i - 1 + line_1_col;
+
+    struct io_strip *d = g_malloc0(sizeof(*d));
+    d->grid = grid;
+    d->left = g_ptr_array_new();
+    d->right = g_ptr_array_new();
+    d->head_l = gtk_grid_get_child_at(GTK_GRID(grid), col, 0);
+    d->head_r =
+      is_pair ? gtk_grid_get_child_at(GTK_GRID(grid), col + 1, 0) : NULL;
+    d->gui_link_elem = is_pair ? snk_l->link_elem : NULL;
+    d->enable_l = snk_l ? snk_l->enable_elem : NULL;
+    d->enable_r = is_pair ? snk_r->enable_elem : NULL;
+    d->num_l = i;
+
+    for (int row = 1; row <= 5; row++) {
+      g_ptr_array_add(
+        d->left, gtk_grid_get_child_at(GTK_GRID(grid), col, row)
+      );
+      g_ptr_array_add(
+        d->right,
+        is_pair ? gtk_grid_get_child_at(GTK_GRID(grid), col + 1, row) : NULL
+      );
+    }
+
+    register_io_strip(d);
+
+    if (is_pair) {
+      struct alsa_elem **pair_elems[] = {
+        vol_elems, mute_elems, sw_hw_elems
+      };
+
+      for (int j = 0; j < G_N_ELEMENTS(pair_elems); j++)
+        register_pair_elem_sync(
+          snk_l->link_elem, pair_elems[j][i], pair_elems[j][i + 1]
+        );
+      i++;
+    }
+  }
 }
 
 // The FCP devices quantise the master volume to the steps of the
@@ -1770,6 +2104,13 @@ static void create_output_controls(
     gtk_grid_attach(GTK_GRID(output_grid), label, i + line_1_col, 0, 1, 1);
   }
 
+  struct alsa_elem **vol_elems =
+    g_new0(struct alsa_elem *, output_count + 2);
+  struct alsa_elem **mute_elems =
+    g_new0(struct alsa_elem *, output_count + 2);
+  struct alsa_elem **sw_hw_elems =
+    g_new0(struct alsa_elem *, output_count + 2);
+
   for (int i = 0; i < elems->len; i++) {
     struct alsa_elem *elem = g_ptr_array_index(elems, i);
     GtkWidget *w;
@@ -1800,6 +2141,8 @@ static void create_output_controls(
                strncmp(elem->name, "Analogue", 8) == 0) {
 
       if (strstr(elem->name, "Playback Volume")) {
+        if (elem->lr_num <= output_count)
+          vol_elems[elem->lr_num] = elem;
         w = make_gain_alsa_elem(elem, 1, WIDGET_GAIN_TAPER_LOG, 1, TRUE);
         setup_output_volume_monitor_group(card, w, elem->lr_num);
         gtk_grid_attach(
@@ -1815,6 +2158,8 @@ static void create_output_controls(
         card->output_gain_widgets = g_list_append(card->output_gain_widgets, og);
 
       } else if (strstr(elem->name, "Playback Switch")) {
+        if (elem->lr_num <= output_count)
+          mute_elems[elem->lr_num] = elem;
         w = make_boolean_alsa_elem(
           elem, "*audio-volume-high", "*audio-volume-muted"
         );
@@ -1831,6 +2176,8 @@ static void create_output_controls(
           GTK_GRID(output_grid), w, elem->lr_num - 1 + line_1_col, 3, 1, 1
         );
       } else if (strstr(elem->name, "Volume Control Playback Enum")) {
+        if (elem->lr_num <= output_count)
+          sw_hw_elems[elem->lr_num] = elem;
         w = make_boolean_alsa_elem(elem, "SW", "HW");
         gtk_widget_add_css_class(w, "sw-hw");
         gtk_widget_set_tooltip_text(
@@ -1928,6 +2275,14 @@ static void create_output_controls(
       );
     }
   }
+
+  setup_output_strips(
+    card, output_grid, line_1_col, output_count,
+    vol_elems, mute_elems, sw_hw_elems
+  );
+  g_free(vol_elems);
+  g_free(mute_elems);
+  g_free(sw_hw_elems);
 
   (*x)++;
 }
