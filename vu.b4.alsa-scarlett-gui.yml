@@ -14,8 +14,11 @@ finish-args:
   - --socket=wayland
   # Needs access to ALSA device nodes:
   - --device=all
-  # Point to the firmware directory
+  # Point to the firmware directories
   - --env=SCARLETT2_FIRMWARE_DIR=/app/lib/firmware/scarlett2
+  - --env=SCARLETT4_FIRMWARE_DIR=/app/lib/firmware/scarlett4
+  # Access to the fcp-server socket (Scarlett 4th Gen large models)
+  - --filesystem=/run/fcp-server
 modules:
   - name: alsa-utils
     sources:
@@ -72,9 +75,18 @@ modules:
   - name: scarlett2-firmware
     sources:
       - type: archive
-        url: https://github.com/geoffreybennett/scarlett2-firmware/archive/refs/tags/2128b.tar.gz
-        sha256: 4a17fdbe2110855c2f7f6cfc5ea1894943a6e58770f3dff5ef283961f8ae2a03
+        url: https://github.com/geoffreybennett/scarlett2-firmware/archive/refs/tags/1.1.tar.gz
+        sha256: be86197db08d768568853d82529d1b8929aea60d8b3690a2a41972800c1ad555
     buildsystem: simple
     build-commands:
       - mkdir -p $FLATPAK_DEST/lib/firmware/scarlett2
       - cp -a LICENSE.Focusrite firmware/* $FLATPAK_DEST/lib/firmware/scarlett2
+  - name: scarlett4-firmware
+    sources:
+      - type: archive
+        url: https://github.com/geoffreybennett/scarlett4-firmware/archive/refs/tags/1.1.tar.gz
+        sha256: 24cde606b03350fd11b96079cc3a1b0db2cef315a3218affbd9e3f3a048a8077
+    buildsystem: simple
+    build-commands:
+      - mkdir -p $FLATPAK_DEST/lib/firmware/scarlett4
+      - cp -a LICENSE.Focusrite firmware/* $FLATPAK_DEST/lib/firmware/scarlett4
