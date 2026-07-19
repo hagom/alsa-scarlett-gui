@@ -13,6 +13,7 @@
 #include "device-port-names.h"
 #include "optional-state.h"
 #include "port-enable.h"
+#include "stringhelper.h"
 #include "widget-boolean.h"
 #include "window-mixer.h"
 #include "window-routing.h"
@@ -1530,6 +1531,79 @@ static void create_snk_stereo_link_elems(
   g_free(pair_key);
 }
 
+// Find the device's own stereo link control for the input pair
+// starting at the given channel (e.g. "Line In 1 Link Capture Switch"
+// or "Line In 1-2 Link Capture Switch")
+struct alsa_elem *get_device_link_elem(GPtrArray *elems, int ch) {
+  for (int i = 0; i < elems->len; i++) {
+    struct alsa_elem *elem = g_ptr_array_index(elems, i);
+
+    if (!elem->card)
+      continue;
+    if (!strstr(elem->name, "Link Capture Switch"))
+      continue;
+
+    int from, to;
+    get_two_num_from_string(elem->name, &from, &to);
+    if (from == ch)
+      return elem;
+  }
+
+  return NULL;
+}
+
+// Coupling between the GUI stereo link and the device's own link
+// switch for analogue input pairs. A GUI-linked pair implies the
+// device link is on: linking in the GUI forces the device link on,
+// and turning the device link off unlinks the pair in the GUI.
+struct device_link_data {
+  struct alsa_elem *gui_link;
+  struct alsa_elem *dev_link;
+};
+
+static void gui_link_sync_device(struct alsa_elem *elem, void *private) {
+  struct device_link_data *d = private;
+
+  if (alsa_get_elem_value(d->gui_link) &&
+      !alsa_get_elem_value(d->dev_link))
+    alsa_set_elem_value(d->dev_link, 1);
+}
+
+static void device_link_sync_gui(struct alsa_elem *elem, void *private) {
+  struct device_link_data *d = private;
+
+  if (!alsa_get_elem_value(d->dev_link) &&
+      alsa_get_elem_value(d->gui_link))
+    alsa_set_elem_value(d->gui_link, 0);
+}
+
+static void register_device_link_coupling(
+  struct alsa_card   *card,
+  struct routing_src *src
+) {
+  if (src->port_category != PC_HW || src->hw_type != HW_TYPE_ANALOGUE)
+    return;
+
+  struct alsa_elem *dev_link =
+    get_device_link_elem(card->elems, src->lr_num);
+  if (!dev_link)
+    return;
+
+  struct device_link_data *data = g_malloc(sizeof(*data));
+  data->gui_link = src->link_elem;
+  data->dev_link = dev_link;
+
+  alsa_elem_add_callback(
+    src->link_elem, gui_link_sync_device, data, g_free
+  );
+  alsa_elem_add_callback(
+    dev_link, device_link_sync_gui, data, NULL
+  );
+
+  // establish the invariant for the link state loaded at startup
+  gui_link_sync_device(src->link_elem, data);
+}
+
 // Register callbacks for a source's link and pair name elements
 static void register_src_link_callbacks(
   struct alsa_card   *card,
@@ -1570,6 +1644,8 @@ static void register_src_link_callbacks(
     alsa_elem_add_callback(
       src->enable_elem, src_enable_sync_callback, src, NULL
     );
+
+  register_device_link_coupling(card, src);
 }
 
 // Register callbacks for a sink's link and pair name elements

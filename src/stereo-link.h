@@ -16,6 +16,10 @@
 // Must be called after port_enable_init()
 void stereo_link_init(struct alsa_card *card);
 
+// Find the device's own stereo link control for the input pair
+// starting at the given channel, or NULL if the device has none
+struct alsa_elem *get_device_link_elem(GPtrArray *elems, int ch);
+
 // Check if a routing source is linked to its partner (forms stereo pair)
 // Returns 1 if linked, 0 if not linked or no valid partner
 int is_src_linked(struct routing_src *src);
