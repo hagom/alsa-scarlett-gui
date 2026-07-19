@@ -1562,6 +1562,66 @@ static char *output_pair_label_text(struct routing_snk *snk_l, int num) {
   return g_strdup_printf("%d–%d", num, num + 1);
 }
 
+// Bind a hardware volume knob's label to an output pair's custom
+// name; falls back to the pair's default name when no custom name is
+// set
+struct output_pair_label {
+  GtkWidget          *label;
+  struct routing_snk *snk_l;
+};
+
+static void output_pair_label_updated(
+  struct alsa_elem *elem,
+  void             *private
+) {
+  struct output_pair_label *d = private;
+  char *name = get_name_elem_string(get_snk_pair_name_elem(d->snk_l));
+
+  if (!name)
+    name = get_snk_default_pair_name(d->snk_l);
+  if (!name)
+    return;
+
+  gtk_label_set_text(GTK_LABEL(d->label), name);
+  g_free(name);
+}
+
+static void bind_output_pair_label(
+  GtkWidget          *label,
+  struct routing_snk *snk_l
+) {
+  struct alsa_elem *pair_name_elem =
+    snk_l ? get_snk_pair_name_elem(snk_l) : NULL;
+
+  if (!pair_name_elem)
+    return;
+
+  struct output_pair_label *data = g_malloc(sizeof(*data));
+  data->label = label;
+  data->snk_l = snk_l;
+
+  alsa_elem_add_callback(
+    pair_name_elem, output_pair_label_updated, data, g_free
+  );
+  output_pair_label_updated(NULL, data);
+}
+
+// Find the left sink of the analogue output pair whose default name
+// identifies it as the headphones pair
+static struct routing_snk *get_headphones_snk(struct alsa_card *card) {
+  for (int i = 1; ; i += 2) {
+    struct routing_snk *snk = get_analogue_output_snk(card, i);
+    if (!snk)
+      return NULL;
+
+    char *def = get_snk_default_pair_name(snk);
+    int found = def && strncmp(def, "Headphones", 10) == 0;
+    g_free(def);
+    if (found)
+      return snk;
+  }
+}
+
 static void set_io_grid_span(GtkWidget *grid, GtkWidget *child, int span) {
   GtkLayoutManager *lm = gtk_widget_get_layout_manager(grid);
   GtkGridLayoutChild *lc =
@@ -2272,6 +2332,8 @@ static void create_output_controls(
 
       GtkWidget *l = gtk_label_new(gen4 ? "Line 1–2" : "HW");
       gtk_grid_attach(GTK_GRID(output_grid), l, 0, 0, 1, 1);
+      if (gen4)
+        bind_output_pair_label(l, get_analogue_output_snk(card, 1));
       if (gen4) {
         w = make_gain_alsa_elem(elem, 1, WIDGET_GAIN_TAPER_GEN4_VOLUME, 0, FALSE);
       } else {
@@ -2290,6 +2352,7 @@ static void create_output_controls(
       gtk_grid_attach(GTK_GRID(output_grid), w, 0, 2, 1, 1);
     } else if (strcmp(elem->name, "Headphone Playback Volume") == 0) {
       GtkWidget *l = gtk_label_new("Headphones");
+      bind_output_pair_label(l, get_headphones_snk(card));
       gtk_widget_set_tooltip_text(
         l,
         "This control shows the setting of the headphone volume knob."
