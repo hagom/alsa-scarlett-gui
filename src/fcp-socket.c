@@ -18,13 +18,13 @@
 // Connect to the FCP socket server for the given card
 int fcp_socket_connect(struct alsa_card *card) {
   if (!card || !card->fcp_socket) {
-    fprintf(stderr, "FCP socket path is not available");
+    fprintf(stderr, "FCP socket path is not available\n");
     return -1;
   }
 
   int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (sock_fd < 0) {
-    fprintf(stderr, "Cannot create socket: %s", strerror(errno));
+    fprintf(stderr, "Cannot create socket: %s\n", strerror(errno));
     return -1;
   }
 
@@ -34,7 +34,7 @@ int fcp_socket_connect(struct alsa_card *card) {
   strncpy(addr.sun_path, card->fcp_socket, sizeof(addr.sun_path) - 1);
 
   if (connect(sock_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-    fprintf(stderr, "Cannot connect to server at %s: %s",
+    fprintf(stderr, "Cannot connect to server at %s: %s\n",
             addr.sun_path, strerror(errno));
     close(sock_fd);
     return -1;
@@ -52,7 +52,7 @@ int fcp_socket_send_command(int sock_fd, uint8_t command) {
   };
 
   if (write(sock_fd, &header, sizeof(header)) != sizeof(header)) {
-    fprintf(stderr, "Error sending command: %s", strerror(errno));
+    fprintf(stderr, "Error sending command: %s\n", strerror(errno));
     return -1;
   }
 
@@ -71,13 +71,13 @@ int fcp_socket_handle_response(int sock_fd, bool show_progress) {
       // Server closed the connection
       return 0;
     }
-    fprintf(stderr, "Error reading response header: %s", strerror(errno));
+    fprintf(stderr, "Error reading response header: %s\n", strerror(errno));
     return -1;
   }
 
   // Verify the magic value
   if (header.magic != FCP_SOCKET_MAGIC_RESPONSE) {
-    fprintf(stderr, "Invalid response magic: 0x%02x", header.magic);
+    fprintf(stderr, "Invalid response magic: 0x%02x\n", header.magic);
     return -1;
   }
 
@@ -88,12 +88,12 @@ int fcp_socket_handle_response(int sock_fd, bool show_progress) {
       uint8_t version;
       bytes_read = read(sock_fd, &version, sizeof(version));
       if (bytes_read != sizeof(version)) {
-        fprintf(stderr, "Error reading version: %s", strerror(errno));
+        fprintf(stderr, "Error reading version: %s\n", strerror(errno));
         return -1;
       }
       // Protocol version mismatch?
       if (version != FCP_SOCKET_PROTOCOL_VERSION) {
-        fprintf(stderr, "Protocol version mismatch: expected %d, got %d",
+        fprintf(stderr, "Protocol version mismatch: expected %d, got %d\n",
                 FCP_SOCKET_PROTOCOL_VERSION, version);
         return -1;
       }
@@ -109,14 +109,14 @@ int fcp_socket_handle_response(int sock_fd, bool show_progress) {
       int16_t error_code;
       bytes_read = read(sock_fd, &error_code, sizeof(error_code));
       if (bytes_read != sizeof(error_code)) {
-        fprintf(stderr, "Error reading error code: %s", strerror(errno));
+        fprintf(stderr, "Error reading error code: %s\n", strerror(errno));
         return -1;
       }
 
       if (error_code > 0 && error_code <= FCP_SOCKET_ERR_MAX) {
-        fprintf(stderr, "Server error: %s", fcp_socket_error_messages[error_code]);
+        fprintf(stderr, "Server error: %s\n", fcp_socket_error_messages[error_code]);
       } else {
-        fprintf(stderr, "Unknown server error code: %d", error_code);
+        fprintf(stderr, "Unknown server error code: %d\n", error_code);
       }
       return -1;
     }
@@ -127,7 +127,7 @@ int fcp_socket_handle_response(int sock_fd, bool show_progress) {
         uint8_t percent;
         bytes_read = read(sock_fd, &percent, sizeof(percent));
         if (bytes_read != sizeof(percent)) {
-          fprintf(stderr, "Error reading progress: %s", strerror(errno));
+          fprintf(stderr, "Error reading progress: %s\n", strerror(errno));
           return -1;
         }
         fprintf(stderr, "\rProgress: %d%%", percent);
@@ -137,7 +137,7 @@ int fcp_socket_handle_response(int sock_fd, bool show_progress) {
         // Skip the progress byte
         uint8_t dummy;
         if (read(sock_fd, &dummy, sizeof(dummy)) < 0) {
-          fprintf(stderr, "Error reading progress: %s", strerror(errno));
+          fprintf(stderr, "Error reading progress: %s\n", strerror(errno));
           return -1;
         }
       }
@@ -147,7 +147,7 @@ int fcp_socket_handle_response(int sock_fd, bool show_progress) {
     }
 
     default:
-      fprintf(stderr, "Unknown response type: 0x%02x", header.msg_type);
+      fprintf(stderr, "Unknown response type: 0x%02x\n", header.msg_type);
       return -1;
   }
 
@@ -238,12 +238,12 @@ static int handle_response_with_progress(
     if (bytes_read != sizeof(header)) {
       if (bytes_read == 0)
         return 0;
-      fprintf(stderr, "Error reading response header: %s", strerror(errno));
+      fprintf(stderr, "Error reading response header: %s\n", strerror(errno));
       return -1;
     }
 
     if (header.magic != FCP_SOCKET_MAGIC_RESPONSE) {
-      fprintf(stderr, "Invalid response magic: 0x%02x", header.magic);
+      fprintf(stderr, "Invalid response magic: 0x%02x\n", header.magic);
       return -1;
     }
 
@@ -252,11 +252,11 @@ static int handle_response_with_progress(
         uint8_t version;
         bytes_read = read(sock_fd, &version, sizeof(version));
         if (bytes_read != sizeof(version)) {
-          fprintf(stderr, "Error reading version: %s", strerror(errno));
+          fprintf(stderr, "Error reading version: %s\n", strerror(errno));
           return -1;
         }
         if (version != FCP_SOCKET_PROTOCOL_VERSION) {
-          fprintf(stderr, "Protocol version mismatch: expected %d, got %d",
+          fprintf(stderr, "Protocol version mismatch: expected %d, got %d\n",
                   FCP_SOCKET_PROTOCOL_VERSION, version);
           return -1;
         }
@@ -270,13 +270,13 @@ static int handle_response_with_progress(
         int16_t error_code;
         bytes_read = read(sock_fd, &error_code, sizeof(error_code));
         if (bytes_read != sizeof(error_code)) {
-          fprintf(stderr, "Error reading error code: %s", strerror(errno));
+          fprintf(stderr, "Error reading error code: %s\n", strerror(errno));
           return -1;
         }
         if (error_code > 0 && error_code <= FCP_SOCKET_ERR_MAX)
-          fprintf(stderr, "Server error: %s", fcp_socket_error_messages[error_code]);
+          fprintf(stderr, "Server error: %s\n", fcp_socket_error_messages[error_code]);
         else
-          fprintf(stderr, "Unknown server error code: %d", error_code);
+          fprintf(stderr, "Unknown server error code: %d\n", error_code);
         return -1;
       }
 
@@ -284,7 +284,7 @@ static int handle_response_with_progress(
         uint8_t percent;
         bytes_read = read(sock_fd, &percent, sizeof(percent));
         if (bytes_read != sizeof(percent)) {
-          fprintf(stderr, "Error reading progress: %s", strerror(errno));
+          fprintf(stderr, "Error reading progress: %s\n", strerror(errno));
           return -1;
         }
         if (progress_callback)
@@ -293,7 +293,7 @@ static int handle_response_with_progress(
       }
 
       default:
-        fprintf(stderr, "Unknown response type: 0x%02x", header.msg_type);
+        fprintf(stderr, "Unknown response type: 0x%02x\n", header.msg_type);
         return -1;
     }
   }
@@ -368,7 +368,7 @@ int fcp_socket_upload_firmware_fd(
   };
 
   if (write(sock_fd, &header, sizeof(header)) != sizeof(header)) {
-    fprintf(stderr, "Error sending header: %s", strerror(errno));
+    fprintf(stderr, "Error sending header: %s\n", strerror(errno));
     return -1;
   }
 
@@ -383,14 +383,14 @@ int fcp_socket_upload_firmware_fd(
     memcpy(payload.md5, md5, 16);
 
   if (write(sock_fd, &payload, sizeof(payload)) != sizeof(payload)) {
-    fprintf(stderr, "Error sending payload header: %s", strerror(errno));
+    fprintf(stderr, "Error sending payload header: %s\n", strerror(errno));
     return -1;
   }
 
   // Send firmware data
   ssize_t written = write(sock_fd, firmware_data, firmware_size);
   if (written != firmware_size) {
-    fprintf(stderr, "Error sending firmware data: %s", strerror(errno));
+    fprintf(stderr, "Error sending firmware data: %s\n", strerror(errno));
     return -1;
   }
 
