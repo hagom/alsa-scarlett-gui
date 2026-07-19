@@ -1521,10 +1521,9 @@ static gboolean alsa_card_callback(
     return 1;
   }
 
-  if (mask == SND_CTL_EVENT_MASK_REMOVE) {
-    card_destroy_callback(card);
+  // returning 0 removes the source, which calls card_destroy_callback
+  if (mask == SND_CTL_EVENT_MASK_REMOVE)
     return 0;
-  }
 
   if (!(mask & (SND_CTL_EVENT_MASK_VALUE | SND_CTL_EVENT_MASK_INFO)))
     return 1;
