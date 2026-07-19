@@ -34,6 +34,22 @@ DEPFLAGS = -MT $@ -MMD -MP -MF $(DEPDIR)/$*.d
 
 CFLAGS ?= -ggdb -fno-omit-frame-pointer -O2
 CFLAGS += -Wall -Werror -fPIE
+
+# AddressSanitizer build: make ASAN=1 (run with ASAN_OPTIONS=detect_leaks=0
+# to silence the leak report on exit)
+ifeq ($(ASAN),1)
+  CFLAGS += -O1 -fsanitize=address
+  LDFLAGS += -fsanitize=address
+  BUILD_MODE := asan
+else
+  BUILD_MODE := normal
+endif
+
+# Rebuild everything when switching between normal and ASan builds
+BUILD_MODE_FILE := .build-mode
+ifneq ($(BUILD_MODE),$(shell cat $(BUILD_MODE_FILE) 2>/dev/null))
+  $(shell echo $(BUILD_MODE) > $(BUILD_MODE_FILE))
+endif
 CFLAGS += -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3
 CFLAGS += -DVERSION=\"$(VERSION)\"
 CFLAGS += -Wno-error=deprecated-declarations
@@ -60,7 +76,7 @@ XML_SRC := $(wildcard *.xml)
 XML_OBJ := $(patsubst %.xml,%.c,$(XML_SRC))
 
 %.o: %.c
-%.o: %.c Makefile $(DEPDIR)/%.d | $(DEPDIR)
+%.o: %.c Makefile $(BUILD_MODE_FILE) $(DEPDIR)/%.d | $(DEPDIR)
 	$(PRINTF) "$(COLOR_GREEN)[%3d%%]$(COLOR_RESET) $(COLOR_BLUE)CC$(COLOR_RESET)   %s\n" $(PCT) $<
 	$(Q)$(COMPILE.c) $(OUTPUT_OPTION) $<
 
@@ -76,7 +92,7 @@ GLIB_COMPILE_RESOURCES := $(shell $(PKG_CONFIG) --variable=glib_compile_resource
 all: $(TARGET) $(DESKTOP_FILE)
 
 clean: depclean
-	rm -f $(TARGET) $(DESKTOP_FILE) $(OBJS) $(XML_OBJ)
+	rm -f $(TARGET) $(DESKTOP_FILE) $(OBJS) $(XML_OBJ) $(BUILD_MODE_FILE)
 	$(MAKE) -C tests clean
 
 depclean:
@@ -133,6 +149,7 @@ help:
 	@echo
 	@echo "This Makefile knows about:"
 	@echo "  make"
+	@echo "  make ASAN=1  (AddressSanitizer build)"
 	@echo "  make install"
 	@echo "  make uninstall"
 	@echo "  make test"
