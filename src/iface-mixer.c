@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2022-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "custom-names.h"
 #include "glow.h"
 #include "gtkhelper.h"
 #include "hardware.h"
@@ -1486,19 +1487,80 @@ static struct alsa_elem *get_input_mute_elem(GPtrArray *elems, int ch) {
 // controls are authoritative); outputs collapse on the GUI stereo
 // link, with volume and mute ganged in software.
 struct io_strip {
-  GtkWidget        *grid;
-  GPtrArray        *left;        // control widgets per row, left channel
-  GPtrArray        *right;       // control widgets per row, right channel
-  GtkWidget        *box;         // row-0 shared pair box (inputs), or NULL
-  GtkWidget        *head_l;      // row-0 channel widget, left
-  GtkWidget        *head_r;      // row-0 channel widget, right
-  GtkWidget        *link_widget;   // chain-icon device link toggle, or NULL
-  struct alsa_elem *hw_link_elem;  // device link, NULL if none
-  struct alsa_elem *gui_link_elem; // GUI link, NULL if not a linkable pair
-  struct alsa_elem *enable_l;      // I/O config enable, NULL if none
-  struct alsa_elem *enable_r;
-  int               num_l;       // channel number (for label text)
+  GtkWidget          *grid;
+  GPtrArray          *left;      // control widgets per row, left channel
+  GPtrArray          *right;     // control widgets per row, right channel
+  GtkWidget          *box;       // row-0 shared pair box (inputs), or NULL
+  GtkWidget          *head_l;    // row-0 channel widget, left
+  GtkWidget          *head_r;    // row-0 channel widget, right
+  GtkWidget          *link_widget;   // chain-icon device link toggle, or NULL
+  struct alsa_elem   *hw_link_elem;  // device link, NULL if none
+  struct alsa_elem   *gui_link_elem; // GUI link, NULL if not a linkable pair
+  struct alsa_elem   *enable_l;      // I/O config enable, NULL if none
+  struct alsa_elem   *enable_r;
+  struct routing_snk *snk_l;     // sinks for label names (outputs only)
+  struct routing_snk *snk_r;
+  int                 num_l;     // channel number (for label text)
 };
+
+// Get the string value of a BYTES name element, or NULL if empty
+static char *get_name_elem_string(struct alsa_elem *elem) {
+  if (!elem)
+    return NULL;
+
+  size_t size;
+  const void *bytes = alsa_get_elem_bytes(elem, &size);
+  if (!bytes || !size)
+    return NULL;
+
+  size_t len = strnlen(bytes, size);
+  if (!len || !g_utf8_validate(bytes, len, NULL))
+    return NULL;
+
+  return g_strndup(bytes, len);
+}
+
+// Label for one channel of an output strip: custom name if set,
+// "HP<n> L/R" for headphone outputs, otherwise the channel number
+static char *output_channel_label_text(struct routing_snk *snk, int num) {
+  if (snk) {
+    char *custom = get_name_elem_string(snk->custom_name_elem);
+    if (custom)
+      return custom;
+
+    char *def = get_snk_default_name_formatted(snk, 0);
+    if (def && strncmp(def, "Headphones ", 11) == 0) {
+      char *label = g_strdup_printf(
+        "HP%d %s", get_num_from_string(def), strstr(def, "(R)") ? "R" : "L"
+      );
+      g_free(def);
+      return label;
+    }
+    g_free(def);
+  }
+
+  return g_strdup_printf("%d", num);
+}
+
+// Label for a collapsed output pair: custom pair name if set, "HP<n>"
+// for headphone outputs, otherwise the channel number range
+static char *output_pair_label_text(struct routing_snk *snk_l, int num) {
+  if (snk_l) {
+    char *custom = get_name_elem_string(get_snk_pair_name_elem(snk_l));
+    if (custom)
+      return custom;
+
+    char *def = get_snk_default_pair_name(snk_l);
+    if (def && strncmp(def, "Headphones ", 11) == 0) {
+      char *label = g_strdup_printf("HP%d", get_num_from_string(def));
+      g_free(def);
+      return label;
+    }
+    g_free(def);
+  }
+
+  return g_strdup_printf("%d–%d", num, num + 1);
+}
 
 static void set_io_grid_span(GtkWidget *grid, GtkWidget *child, int span) {
   GtkLayoutManager *lm = gtk_widget_get_layout_manager(grid);
@@ -1549,19 +1611,27 @@ static void io_strip_updated(struct alsa_elem *elem, void *private) {
     if (!d->box && d->head_r)
       set_io_grid_span(d->grid, d->head_l, gui_linked ? 2 : 1);
 
-    // number labels show the pair range when collapsed
+    // number labels show custom names, the pair range when
+    // collapsed, or the channel number
     if (GTK_IS_LABEL(d->head_l)) {
-      char s[20];
+      char *text = gui_linked
+        ? output_pair_label_text(d->snk_l, d->num_l)
+        : output_channel_label_text(d->snk_l, d->num_l);
 
-      if (gui_linked)
-        snprintf(s, 20, "%d–%d", d->num_l, d->num_l + 1);
-      else
-        snprintf(s, 20, "%d", d->num_l);
-      gtk_label_set_text(GTK_LABEL(d->head_l), s);
+      gtk_label_set_text(GTK_LABEL(d->head_l), text);
+      g_free(text);
     }
   }
-  if (d->head_r)
+  if (d->head_r) {
     gtk_widget_set_visible(d->head_r, show_head_r);
+
+    if (GTK_IS_LABEL(d->head_r)) {
+      char *text = output_channel_label_text(d->snk_r, d->num_l + 1);
+
+      gtk_label_set_text(GTK_LABEL(d->head_r), text);
+      g_free(text);
+    }
+  }
   if (d->link_widget)
     gtk_widget_set_visible(d->link_widget, en_l && en_r && !gui_linked);
   if (d->box)
@@ -1580,10 +1650,14 @@ static void io_strip_free(void *p) {
 // the initial state
 static void register_io_strip(struct io_strip *d) {
   int owner = 1;
-  struct alsa_elem *elems[4] =
-    { d->hw_link_elem, d->gui_link_elem, d->enable_l, d->enable_r };
+  struct alsa_elem *elems[7] = {
+    d->hw_link_elem, d->gui_link_elem, d->enable_l, d->enable_r,
+    d->snk_l ? d->snk_l->custom_name_elem : NULL,
+    d->snk_r ? d->snk_r->custom_name_elem : NULL,
+    d->snk_l ? get_snk_pair_name_elem(d->snk_l) : NULL,
+  };
 
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 7; i++) {
     if (!elems[i])
       continue;
     alsa_elem_add_callback(
@@ -1962,6 +2036,8 @@ static void setup_output_strips(
     d->gui_link_elem = is_pair ? snk_l->link_elem : NULL;
     d->enable_l = snk_l ? snk_l->enable_elem : NULL;
     d->enable_r = is_pair ? snk_r->enable_elem : NULL;
+    d->snk_l = snk_l;
+    d->snk_r = is_pair ? snk_r : NULL;
     d->num_l = i;
 
     for (int row = 1; row <= 5; row++) {
