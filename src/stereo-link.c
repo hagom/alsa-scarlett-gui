@@ -1184,6 +1184,39 @@ static void sync_monitor_groups_on_link(
   }
 }
 
+// Re-apply stereo-aware monitor group source pairing to all linked
+// output pairs. Called when a source's link state changes: a linked
+// output pair referencing the source pair needs its right channel
+// remapped (e.g. Mix A/Mix A becomes Mix A/Mix B when Mix A-B links).
+static void resync_monitor_group_sources(struct alsa_card *card) {
+  if (!card->routing_snks || !card->monitor_group_count)
+    return;
+
+  for (int i = 0; i < card->routing_snks->len; i++) {
+    struct routing_snk *snk_l = &g_array_index(
+      card->routing_snks, struct routing_snk, i
+    );
+
+    if (!snk_l->elem ||
+        snk_l->elem->port_category != PC_HW ||
+        snk_l->elem->hw_type != HW_TYPE_ANALOGUE)
+      continue;
+    if (!is_snk_left_channel(snk_l) || !is_snk_linked(snk_l))
+      continue;
+
+    struct routing_snk *snk_r = get_snk_partner(snk_l);
+    if (!snk_r)
+      continue;
+
+    for (int g = 0; g < card->monitor_group_count; g++)
+      sync_monitor_group_source_pair(
+        card,
+        snk_l->monitor_groups[g].source,
+        snk_r->monitor_groups[g].source
+      );
+  }
+}
+
 // Monitor group sync: keep left/right elements in lockstep while
 // linked.  A single callback handles both directions — left always
 // wins.  For SOURCE type, uses stereo-aware enum assignment instead
@@ -1285,6 +1318,11 @@ static void src_link_state_changed(struct alsa_elem *elem, void *private) {
   // Recreate mixer widgets when mixer outputs are linked/unlinked
   if (src_l && src_l->port_category == PC_MIX)
     recreate_mixer_widgets(src_l->card);
+
+  // Linked output pairs referencing this source pair need their
+  // right channel's monitor group source remapped
+  if (src_l)
+    resync_monitor_group_sources(src_l->card);
 
   // Rebuild monitor groups grid (source link affects dropdown filtering)
   if (src_l && src_l->card && src_l->card->monitor_groups_grid)
