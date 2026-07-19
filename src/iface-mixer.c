@@ -3,6 +3,7 @@
 
 #include "glow.h"
 #include "gtkhelper.h"
+#include "hardware.h"
 #include "iface-mixer.h"
 #include "presets.h"
 #include "window-preferences.h"
@@ -1655,6 +1656,36 @@ static void create_input_controls(
   (*x)++;
 }
 
+// The FCP devices quantise the master volume to the steps of the
+// volume knob taper; writes off the table are snapped to the nearest
+// entry (note -78 is not accepted). Verified identical by sweeping
+// the 18i20, 18i16, and 16i16 4th Gen, and the ISA C8X.
+static const int fcp_master_volume_map[] = {
+  -127, -118, -109, -100, -97, -95, -92, -90, -87, -85,
+  -84, -83, -82, -81, -80, -79, -77, -76, -75, -74,
+  -73, -72, -71, -70, -69, -68, -67, -66, -65, -64,
+  -63, -62, -61, -60, -59, -58, -57, -56, -55, -54,
+  -53, -52, -51, -50, -49, -48, -47, -46, -45, -44,
+  -43, -42, -41, -40, -39, -38, -37, -36, -35, -34,
+  -33, -32, -31, -30, -29, -28, -27, -26, -25, -24,
+  -23, -22, -21, -20, -19, -18, -17, -16, -15, -14,
+  -13, -12, -11, -10, -9, -8, -7, -6, -5, -4,
+  -3, -2, -1, 0,
+};
+
+// Check if a device's master volume uses fcp_master_volume_map
+static int pid_has_master_volume_map(uint32_t pid) {
+  switch (pid) {
+    case PID_SCARLETT_GEN4_16I16:
+    case PID_SCARLETT_GEN4_18I16:
+    case PID_SCARLETT_GEN4_18I20:
+    case PID_ISA_C8X:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 static void create_output_controls(
   struct alsa_card *card,
   GtkWidget        *top,
@@ -1749,11 +1780,18 @@ static void create_output_controls(
 
     // output controls
 
-    // Gen 1 master output control
+    // Master output control (Gen 1 and FCP devices)
     if (strcmp(elem->name, "Master Playback Volume") == 0) {
       GtkWidget *l = gtk_label_new("Master");
       gtk_grid_attach(GTK_GRID(output_grid), l, 0, 0, 1, 1);
-      w = make_gain_alsa_elem(elem, 1, WIDGET_GAIN_TAPER_LOG, 0, FALSE);
+      if (pid_has_master_volume_map(card->pid))
+        w = make_mapped_gain_alsa_elem(
+          elem, 1, 1, FALSE,
+          fcp_master_volume_map,
+          sizeof(fcp_master_volume_map) / sizeof(int)
+        );
+      else
+        w = make_gain_alsa_elem(elem, 1, WIDGET_GAIN_TAPER_LOG, 0, FALSE);
       gtk_widget_set_tooltip_text(w, "Master Volume Control");
       gtk_grid_attach(GTK_GRID(output_grid), w, 0, 2, 1, 1);
 

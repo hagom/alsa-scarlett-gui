@@ -87,6 +87,15 @@ void gtk_dial_set_taper_linear_breakpoints(
   int           count
 );
 
+// Restrict the dial to a set of values (sorted ascending): setting a
+// value snaps to the nearest entry and stepping moves through the
+// entries. Pass NULL/0 to remove the restriction.
+void gtk_dial_set_valid_values(
+  GtkDial   *dial,
+  const int *values,
+  int        count
+);
+
 void gtk_dial_set_can_control(GtkDial *dial, gboolean can_control);
 gboolean gtk_dial_get_can_control(GtkDial *dial);
 

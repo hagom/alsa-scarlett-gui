@@ -21,6 +21,19 @@ GtkWidget *make_gain_alsa_elem(
   gboolean          show_level
 );
 
+// Create a gain widget restricted to a table of values the device
+// accepts (sorted ascending). Used for controls the device quantises
+// to its own step table: the dial snaps to table entries and each
+// keyboard/scroll step moves to the next real device value.
+GtkWidget *make_mapped_gain_alsa_elem(
+  struct alsa_elem *elem,
+  int               zero_is_off,
+  int               can_control,
+  gboolean          show_level,
+  const int        *value_map,
+  int               value_map_len
+);
+
 // Get the dial widget from a gain widget container (for level updates)
 GtkWidget *get_gain_dial(GtkWidget *gain_widget);
 

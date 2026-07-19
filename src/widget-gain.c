@@ -336,6 +336,27 @@ GtkWidget *make_gain_alsa_elem(
   return finish_gain_widget(data);
 }
 
+GtkWidget *make_mapped_gain_alsa_elem(
+  struct alsa_elem *elem,
+  int               zero_is_off,
+  int               can_control,
+  gboolean          show_level,
+  const int        *value_map,
+  int               value_map_len
+) {
+  struct gain *data = calloc(1, sizeof(struct gain));
+  data->elem_count = 1;
+  data->elems[0] = elem;
+
+  init_gain_widget(data, elem, zero_is_off, WIDGET_GAIN_TAPER_LOG,
+                   can_control, show_level);
+  gtk_dial_set_valid_values(
+    GTK_DIAL(data->dial), value_map, value_map_len
+  );
+
+  return finish_gain_widget(data);
+}
+
 GtkWidget *get_gain_dial(GtkWidget *gain_widget) {
   return g_object_get_data(G_OBJECT(gain_widget), "dial");
 }

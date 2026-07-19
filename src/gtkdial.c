@@ -138,6 +138,11 @@ struct _GtkDial {
   double *taper_outputs;
   int taper_breakpoints_count;
 
+  // when set, the dial only takes these values: set_value() snaps to
+  // the nearest entry and stepping moves through the entries
+  double *valid_values;
+  int valid_values_count;
+
   // level meter colour breakpoints array
   const int *level_breakpoints;
   const double *level_colours;
@@ -1543,7 +1548,22 @@ static void gtk_dial_add_hist_value(GtkDial *dial, double value) {
     dial->current_peak = value;
 }
 
+// Index of the valid value nearest to val
+static int valid_value_nearest(GtkDial *dial, double val) {
+  int best = 0;
+
+  for (int i = 1; i < dial->valid_values_count; i++)
+    if (fabs(dial->valid_values[i] - val) <
+        fabs(dial->valid_values[best] - val))
+      best = i;
+
+  return best;
+}
+
 static int set_value(GtkDial *dial, double newval) {
+  if (dial->valid_values_count)
+    newval = dial->valid_values[valid_value_nearest(dial, newval)];
+
   if (dial->round_digits >= 0) {
     double power;
     int i;
@@ -1610,6 +1630,20 @@ static double do_step(GtkDial *dial, double step_amount) {
   double mx = gtk_adjustment_get_upper(dial->adj);
   double newval = gtk_adjustment_get_value(dial->adj);
   double step = gtk_adjustment_get_step_increment(dial->adj);
+
+  // Valid-values dial: apply the step then move to the nearest valid
+  // value, going at least one entry so steps smaller than the local
+  // spacing still move the dial
+  if (dial->valid_values_count) {
+    int idx = valid_value_nearest(dial, newval);
+    int new_idx = valid_value_nearest(dial, newval + step_amount);
+
+    if (new_idx == idx)
+      new_idx += step_amount > 0 ? 1 : -1;
+
+    new_idx = CLAMP(new_idx, 0, dial->valid_values_count - 1);
+    return dial->valid_values[new_idx];
+  }
 
   if (gtk_dial_get_is_linear(dial)) {
     double db_val = linear_value_to_cdb(newval, mn, mx, -8000, 1200) / 100.0;
@@ -1887,8 +1921,33 @@ static gboolean gtk_dial_scroll_controller_scroll(
   return GDK_EVENT_STOP;
 }
 
+void gtk_dial_set_valid_values(
+  GtkDial   *dial,
+  const int *values,
+  int        count
+) {
+  free(dial->valid_values);
+  dial->valid_values = NULL;
+  dial->valid_values_count = 0;
+
+  if (!values || count <= 0)
+    return;
+
+  dial->valid_values = malloc(count * sizeof(double));
+  for (int i = 0; i < count; i++)
+    dial->valid_values[i] = values[i];
+  dial->valid_values_count = count;
+
+  // move the current value onto the table
+  set_value(dial, gtk_dial_get_value(dial));
+}
+
 void gtk_dial_dispose(GObject *o) {
   GtkDial *dial = GTK_DIAL(o);
+
+  free(dial->valid_values);
+  dial->valid_values = NULL;
+  dial->valid_values_count = 0;
 
   free(dial->taper_breakpoints);
   dial->taper_breakpoints = NULL;
