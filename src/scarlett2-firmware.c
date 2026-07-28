@@ -78,12 +78,13 @@ struct scarlett2_firmware_header *scarlett2_read_firmware_header(
   }
 
   struct scarlett2_firmware_file *firmware = read_header(file);
+
+  fclose(file);
+
   if (!firmware) {
     fprintf(stderr, "Error reading firmware header from %s\n", fn);
     return NULL;
   }
-
-  fclose(file);
 
   return realloc(firmware, sizeof(struct scarlett2_firmware_header));
 }
@@ -99,6 +100,7 @@ struct scarlett2_firmware_file *scarlett2_read_firmware_file(const char *fn) {
   struct scarlett2_firmware_file *firmware = read_header(file);
   if (!firmware) {
     fprintf(stderr, "Error reading firmware header from %s\n", fn);
+    fclose(file);
     return NULL;
   }
 
