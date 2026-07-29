@@ -7,8 +7,8 @@
 #include "tooltips.h"
 #include "widget-boolean.h"
 #include "widget-drop-down.h"
+#include "window-configuration.h"
 #include "window-helper.h"
-#include "window-startup.h"
 
 GtkWidget *create_iface_no_mixer_main(struct alsa_card *card) {
   GPtrArray *elems = card->elems;
@@ -117,12 +117,15 @@ GtkWidget *create_iface_no_mixer_main(struct alsa_card *card) {
     }
   }
 
-  card->window_startup = create_subwindow(
-    card, "Startup Configuration", G_CALLBACK(window_startup_close_request)
+  card->window_configuration = create_subwindow(
+    card, "Configuration", G_CALLBACK(window_configuration_close_request)
   );
+  gtk_window_set_resizable(GTK_WINDOW(card->window_configuration), TRUE);
 
-  GtkWidget *startup = create_startup_controls(card);
-  gtk_window_set_child(GTK_WINDOW(card->window_startup), startup);
+  GtkWidget *configuration = create_configuration_controls(card);
+  gtk_window_set_child(
+    GTK_WINDOW(card->window_configuration), configuration
+  );
 
   return top;
 }

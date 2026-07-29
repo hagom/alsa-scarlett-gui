@@ -6,3 +6,7 @@
 #include "alsa.h"
 
 GtkWidget *create_startup_controls(struct alsa_card *card);
+
+// Adds the Startup tab to the configuration notebook; adds nothing when
+// the device has no startup controls or reset actions
+void add_startup_tab(GtkWidget *notebook, struct alsa_card *card);

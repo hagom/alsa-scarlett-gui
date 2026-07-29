@@ -19,7 +19,6 @@ static const struct window_action window_actions[] = {
   { "mixer",         offsetof(struct alsa_card, window_mixer)         },
   { "levels",        offsetof(struct alsa_card, window_levels)        },
   { "configuration", offsetof(struct alsa_card, window_configuration) },
-  { "startup",       offsetof(struct alsa_card, window_startup)       },
   { "dsp",           offsetof(struct alsa_card, window_dsp)           },
   { "preferences",   offsetof(struct alsa_card, window_preferences)   },
   { NULL, 0 }
@@ -140,7 +139,6 @@ static const struct menu_data menus[] = {
       { "_Levels",        "win.levels",        { "<Control>L", NULL } },
       { "_DSP",           "win.dsp",           { "<Control>D", NULL } },
       { "_Configuration", "win.configuration", { "<Control>G", NULL } },
-      { "_Startup",       "win.startup",       { "<Control>T", NULL } },
       { "_Preferences",   "win.preferences",   { "<Control>P", NULL } },
       {}
     }
@@ -213,19 +211,6 @@ void add_load_save_action_map(struct alsa_card *card) {
   );
 }
 
-static const GActionEntry startup_entry[] = {
-  {"startup", activate_window, NULL, "false"}
-};
-
-void add_startup_action_map(struct alsa_card *card) {
-  g_action_map_add_action_entries(
-    G_ACTION_MAP(card->window_main),
-    startup_entry,
-    G_N_ELEMENTS(startup_entry),
-    card
-  );
-}
-
 static const GActionEntry mixer_entries[] = {
   {"routing", activate_window, NULL, "false"},
   {"mixer",   activate_window, NULL, "false"}
@@ -256,8 +241,9 @@ void add_mixer_action_map(struct alsa_card *card) {
       card
     );
   }
+}
 
-  // Always show configuration menu
+void add_configuration_action_map(struct alsa_card *card) {
   g_action_map_add_action_entries(
     G_ACTION_MAP(card->window_main),
     configuration_entries,

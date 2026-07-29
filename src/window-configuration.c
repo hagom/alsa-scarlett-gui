@@ -18,6 +18,7 @@
 #include "config-front-panel.h"
 #include "config-io.h"
 #include "config-monitor-groups.h"
+#include "window-startup.h"
 
 struct configuration_window {
   struct alsa_card *card;
@@ -158,6 +159,9 @@ GtkWidget *create_configuration_controls(struct alsa_card *card) {
 
   // Monitor Groups tab
   add_monitor_groups_tab(top_notebook, card);
+
+  // Startup tab
+  add_startup_tab(top_notebook, card);
 
   // Add top notebook to main container (only if it has pages)
   if (gtk_notebook_get_n_pages(GTK_NOTEBOOK(top_notebook)) > 0) {

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "config-helpers.h"
 #include "device-reset-config.h"
 #include "device-update-firmware.h"
 #include "fcp-socket.h"
@@ -10,6 +11,7 @@
 #include "scarlett4-firmware.h"
 #include "widget-boolean.h"
 #include "widget-drop-down.h"
+#include "window-configuration.h"
 #include "window-startup.h"
 
 // Wrapper for create_update_firmware_window (passes NULL for parent_label)
@@ -30,16 +32,7 @@ static GtkWidget *small_label(const char *text) {
 }
 
 static GtkWidget *big_label(const char *text) {
-  GtkWidget *view = gtk_text_view_new ();
-  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (view));
-
-  gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (view), GTK_WRAP_WORD);
-  gtk_widget_set_size_request (view, 600, -1);
-  gtk_widget_set_sensitive (view, FALSE);
-
-  gtk_text_buffer_set_text (buffer, text, -1);
-
-  return view;
+  return config_wrapped_help_label(text, 70);
 }
 
 static void add_sep(GtkWidget *grid, int *grid_y) {
@@ -406,31 +399,66 @@ static void add_no_startup_controls_msg(GtkWidget *grid) {
   gtk_grid_attach(GTK_GRID(grid), w, 0, 0, 1, 1);
 }
 
-GtkWidget *create_startup_controls(struct alsa_card *card) {
+/* The controls, without the surrounding frame. grid_y ends up zero when
+ * the device has none of them, which is what lets the caller decide
+ * between a placeholder and omitting the tab.
+ */
+static GtkWidget *create_startup_grid(
+  struct alsa_card *card,
+  int              *grid_y
+) {
   GPtrArray *elems = card->elems;
 
-  GtkWidget *top = gtk_frame_new(NULL);
-  gtk_widget_add_css_class(top, "window-frame");
-
-  int grid_y = 0;
-
   GtkWidget *grid = gtk_grid_new();
-  gtk_widget_add_css_class(grid, "window-content");
-  gtk_widget_add_css_class(grid, "top-level-content");
   gtk_widget_add_css_class(grid, "window-startup");
   gtk_grid_set_column_spacing(GTK_GRID(grid), 20);
   gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
-  gtk_frame_set_child(GTK_FRAME(top), grid);
 
-  add_standalone_control(elems, grid, &grid_y);
-  add_phantom_persistence_control(elems, grid, &grid_y);
-  int has_msd = add_msd_control(elems, grid, &grid_y);
-  int has_spdif_mode = add_spdif_mode_control(elems, grid, &grid_y);
+  *grid_y = 0;
+
+  add_standalone_control(elems, grid, grid_y);
+  add_phantom_persistence_control(elems, grid, grid_y);
+  int has_msd = add_msd_control(elems, grid, grid_y);
+  int has_spdif_mode = add_spdif_mode_control(elems, grid, grid_y);
   int show_reboot_option = has_msd || has_spdif_mode;
-  add_reset_actions(card, grid, &grid_y, show_reboot_option);
+  add_reset_actions(card, grid, grid_y, show_reboot_option);
+
+  return grid;
+}
+
+// Used as the main window contents for a device in MSD mode
+GtkWidget *create_startup_controls(struct alsa_card *card) {
+  GtkWidget *top = gtk_frame_new(NULL);
+  gtk_widget_add_css_class(top, "window-frame");
+
+  int grid_y;
+  GtkWidget *grid = create_startup_grid(card, &grid_y);
+  gtk_widget_add_css_class(grid, "window-content");
+  gtk_widget_add_css_class(grid, "top-level-content");
+  gtk_frame_set_child(GTK_FRAME(top), grid);
 
   if (!grid_y)
     add_no_startup_controls_msg(grid);
 
   return top;
+}
+
+void add_startup_tab(GtkWidget *notebook, struct alsa_card *card) {
+  int grid_y;
+  GtkWidget *grid = create_startup_grid(card, &grid_y);
+
+  // Nothing to show, so no tab rather than an empty one
+  if (!grid_y) {
+    g_object_ref_sink(grid);
+    g_object_unref(grid);
+    return;
+  }
+
+  gtk_widget_set_margin(grid, 20);
+
+  GtkWidget *scrolled = wrap_tab_content_scrolled(grid);
+  g_object_set_data(G_OBJECT(scrolled), PAGE_ID_KEY, (gpointer)"startup");
+  gtk_notebook_append_page(
+    GTK_NOTEBOOK(notebook), scrolled, gtk_label_new("Startup")
+  );
 }

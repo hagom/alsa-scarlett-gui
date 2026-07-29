@@ -91,12 +91,6 @@ static void update_window_titles(struct alsa_elem *elem, void *private) {
     g_free(config_title);
   }
 
-  if (card->window_startup) {
-    char *startup_title = g_strdup_printf("%s - Startup Configuration", title);
-    gtk_window_set_title(GTK_WINDOW(card->window_startup), startup_title);
-    g_free(startup_title);
-  }
-
   if (card->window_dsp) {
     char *dsp_title = g_strdup_printf("%s - DSP", title);
     gtk_window_set_title(GTK_WINDOW(card->window_dsp), dsp_title);
@@ -138,10 +132,6 @@ static void cleanup_subwindows(struct alsa_card *card) {
   if (card->window_configuration) {
     gtk_window_destroy(GTK_WINDOW(card->window_configuration));
     card->window_configuration = NULL;
-  }
-  if (card->window_startup) {
-    gtk_window_destroy(GTK_WINDOW(card->window_startup));
-    card->window_startup = NULL;
   }
   if (card->window_modal) {
     gtk_window_destroy(GTK_WINDOW(card->window_modal));
@@ -194,13 +184,13 @@ static void create_card_window(struct alsa_card *card) {
   // must close it first with close_card_window()
   window_count++;
 
-  int has_startup = true;
+  int has_configuration = true;
   int has_mixer = true;
 
   // Check if the FCP driver is not initialised yet
   if (card->driver_type == DRIVER_TYPE_SOCKET_UNINIT) {
     card->window_main_contents = create_iface_waiting_main(card);
-    has_startup = false;
+    has_configuration = false;
     has_mixer = false;
 
     // Create minimal window with only the waiting interface
@@ -261,13 +251,12 @@ static void create_card_window(struct alsa_card *card) {
       (card->best_firmware_version > firmware_version && in_msd_mode) ||
       fcp_needs_update) {
     card->window_main_contents = create_iface_update_main(card);
-    has_startup = false;
+    has_configuration = false;
     has_mixer = false;
 
   // Scarlett Gen 1
   } else if (get_elem_by_prefix(card->elems, "Matrix")) {
     card->window_main_contents = create_iface_mixer_main(card);
-    has_startup = false;
 
   // Scarlett Gen 2, Gen 3 4i4+, Gen 4, Clarett, or Vocaster
   } else if (get_elem_by_prefix(card->elems, "Mixer")) {
@@ -281,13 +270,13 @@ static void create_card_window(struct alsa_card *card) {
   // Scarlett Gen 3+ or Vocaster in MSD Mode
   } else if (msd_elem) {
     card->window_main_contents = create_startup_controls(card);
-    has_startup = false;
+    has_configuration = false;
     has_mixer = false;
 
   // Unknown
   } else {
     card->window_main_contents = create_iface_unknown_main();
-    has_startup = false;
+    has_configuration = false;
     has_mixer = false;
   }
 
@@ -307,8 +296,8 @@ static void create_card_window(struct alsa_card *card) {
     GTK_APPLICATION_WINDOW(card->window_main), TRUE
   );
   add_window_action_map(GTK_WINDOW(card->window_main));
-  if (has_startup)
-    add_startup_action_map(card);
+  if (has_configuration)
+    add_configuration_action_map(card);
   if (has_mixer)
     add_mixer_action_map(card);
   if (has_mixer)

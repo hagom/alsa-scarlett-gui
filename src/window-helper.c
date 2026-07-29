@@ -4,11 +4,11 @@
 #include "window-helper.h"
 #include "window-iface.h"
 
-gboolean window_startup_close_request(GtkWindow *w, gpointer data) {
+gboolean window_configuration_close_request(GtkWindow *w, gpointer data) {
   struct alsa_card *card = data;
 
   gtk_widget_activate_action(
-    GTK_WIDGET(card->window_main), "win.startup", NULL
+    GTK_WIDGET(card->window_main), "win.configuration", NULL
   );
   return true;
 }
@@ -42,7 +42,6 @@ static gboolean on_key_press(
       case GDK_KEY_l: action = "win.levels";        break;
       case GDK_KEY_d: action = "win.dsp";           break;
       case GDK_KEY_g: action = "win.configuration"; break;
-      case GDK_KEY_t: action = "win.startup";       break;
       case GDK_KEY_p: action = "win.preferences";   break;
       case GDK_KEY_o: action = "win.load";          break;
       case GDK_KEY_s: action = "win.save";          break;
