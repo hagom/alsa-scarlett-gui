@@ -1479,6 +1479,9 @@ static void check_driver_init(
   // The driver is initialised; update the card's driver type
   card->driver_type = DRIVER_TYPE_SOCKET;
 
+  // Close the placeholder window shown while waiting for the driver
+  close_card_window(card);
+
   // Complete the card initialisation
   complete_card_init(card);
 }

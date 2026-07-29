@@ -11,5 +11,6 @@ char *get_card_window_title(struct alsa_card *card);
 
 void create_card_window(struct alsa_card *card);
 void create_no_card_window(void);
+void close_card_window(struct alsa_card *card);
 void destroy_card_window(struct alsa_card *card);
 void check_modal_window_closed(void);

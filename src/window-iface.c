@@ -156,9 +156,9 @@ static void cleanup_subwindows(struct alsa_card *card) {
   }
 }
 
-// Handle main window close - clean up before window is destroyed
-static gboolean main_window_close_request(GtkWindow *w, gpointer data) {
-  struct alsa_card *card = data;
+// Release everything hanging off the main window. The caller must
+// destroy the window itself afterwards.
+static void teardown_main_window_state(struct alsa_card *card) {
 
   // set to NULL first so timer callbacks can detect cleanup is happening
   card->window_main = NULL;
@@ -172,6 +172,13 @@ static gboolean main_window_close_request(GtkWindow *w, gpointer data) {
   routing_levels_cleanup(card);
   cleanup_gain_widget_lists(card);
   cleanup_subwindows(card);
+}
+
+// Handle main window close - clean up before window is destroyed
+static gboolean main_window_close_request(GtkWindow *w, gpointer data) {
+  struct alsa_card *card = data;
+
+  teardown_main_window_state(card);
 
   return FALSE;
 }
@@ -182,13 +189,9 @@ void create_card_window(struct alsa_card *card) {
     no_cards_window = NULL;
   }
 
-  // Replacing an existing window
-  if (card->window_main)
-    gtk_window_destroy(GTK_WINDOW(card->window_main));
-
-  // New window
-  else
-    window_count++;
+  // This function only ever creates a window; a caller replacing one
+  // must close it first with close_card_window()
+  window_count++;
 
   int has_startup = true;
   int has_mixer = true;
@@ -344,20 +347,23 @@ void create_no_card_window(void) {
     no_cards_window = create_window_iface_none(app);
 }
 
-void destroy_card_window(struct alsa_card *card) {
-  // clean up first (close-request is not emitted by gtk_window_destroy,
-  // only by user-initiated close)
-  routing_levels_cleanup(card);
-  cleanup_gain_widget_lists(card);
-  cleanup_subwindows(card);
+// Close a card's main window and everything hanging off it
+void close_card_window(struct alsa_card *card) {
+  GtkWidget *old_window = card->window_main;
 
-  if (card->window_main) {
-    gtk_window_destroy(GTK_WINDOW(card->window_main));
-    card->window_main = NULL;
-  }
+  teardown_main_window_state(card);
+  if (old_window)
+    gtk_window_destroy(GTK_WINDOW(old_window));
+
+  // paired with the increment in create_card_window(); the close-request
+  // path leaves the count to card removal
+  window_count--;
+}
+
+void destroy_card_window(struct alsa_card *card) {
+  close_card_window(card);
 
   // if last window, display the "no card found" blank window
-  window_count--;
   create_no_card_window();
 }
 
