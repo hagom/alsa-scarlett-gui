@@ -473,7 +473,9 @@ void alsa_init_mixer_gains_cache(struct alsa_card *card);
 // ready:    the card's controls are known and it can be presented
 // closing:  the card's presentation must be torn down, either because
 //           the card is going away (gone) or because it is about to be
-//           reported ready again with a different interface (!gone)
+//           reported ready again with a different interface (!gone).
+//           A card going away is already out of the card list, so an
+//           observer enumerating cards sees the set it is left with.
 struct alsa_card_lifecycle {
   void (*ready)(struct alsa_card *card);
   void (*closing)(struct alsa_card *card, int gone);

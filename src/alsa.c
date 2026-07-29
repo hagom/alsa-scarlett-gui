@@ -1252,6 +1252,16 @@ static void card_destroy_callback(void *data) {
     card->levels_timer = 0;
   }
 
+  /* Take the card out of the list before anything else, so that nothing
+   * called from here can find a card that is being freed.
+   */
+  for (int i = 0; i < alsa_cards->len; i++) {
+    struct alsa_card **card_ptr =
+      &g_array_index(alsa_cards, struct alsa_card *, i);
+    if (*card_ptr == card)
+      *card_ptr = NULL;
+  }
+
   // tear down the card's presentation
   if (card_lifecycle)
     card_lifecycle->closing(card, 1);
@@ -1335,14 +1345,6 @@ static void card_destroy_callback(void *data) {
   free(card->name);
   free(card->fcp_socket);
   free(card);
-
-  // go through the alsa_cards array and clear the entry for this card
-  for (int i = 0; i < alsa_cards->len; i++) {
-    struct alsa_card **card_ptr =
-      &g_array_index(alsa_cards, struct alsa_card *, i);
-    if (*card_ptr == card)
-      *card_ptr = NULL;
-  }
 }
 
 void alsa_init_mixer_gains_cache(struct alsa_card *card) {
