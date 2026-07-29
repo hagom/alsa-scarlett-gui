@@ -7,17 +7,9 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <openssl/sha.h>
-#include <sys/stat.h>
 
+#include "firmware-store.h"
 #include "scarlett2-firmware.h"
-
-// List of found firmware files
-struct found_firmware {
-  char                             *fn;
-  struct scarlett2_firmware_header *firmware;
-};
-
-GHashTable *best_firmware = NULL;
 
 static int verify_sha256(
   const unsigned char *data,
@@ -153,144 +145,43 @@ void scarlett2_free_firmware_file(struct scarlett2_firmware_file *firmware) {
   }
 }
 
-static void free_found_firmware(gpointer data) {
-  struct found_firmware *found = data;
+/* Record fn in the firmware store, if it holds a usable header.
+ * Takes ownership of fn.
+ */
+void scarlett2_store_firmware(char *fn) {
+  struct scarlett2_firmware_header *firmware =
+    scarlett2_read_firmware_header(fn);
 
-  free(found->fn);
-  scarlett2_free_firmware_header(found->firmware);
-  free(found);
-}
-
-static void init_best_firmware(void) {
-  if (best_firmware)
+  if (!firmware) {
+    g_free(fn);
     return;
+  }
 
-  best_firmware = g_hash_table_new_full(
-    g_direct_hash, g_direct_equal, NULL, free_found_firmware
+  // A single-component version, held in the first element
+  uint32_t version[FIRMWARE_VERSION_PARTS] = { firmware->firmware_version };
+
+  firmware_store_add(
+    FIRMWARE_GENERATION_SCARLETT2, firmware->usb_pid, version, fn
   );
-}
 
-// Add a firmware file to the list of found firmware
-// files, if it's better than the one already found
-// for the same device.
-static void add_found_firmware(
-  char                             *fn,
-  struct scarlett2_firmware_header *firmware
-) {
-  gpointer key = GINT_TO_POINTER(firmware->usb_pid);
-  struct found_firmware *found = g_hash_table_lookup(best_firmware, key);
-
-  // already have a firmware file for this device?
-  if (found) {
-
-    // lower version number, ignore
-    if (firmware->firmware_version <= found->firmware->firmware_version) {
-      free(fn);
-      scarlett2_free_firmware_header(firmware);
-      return;
-    }
-
-    // higher version number, replace
-    g_hash_table_remove(best_firmware, key);
-  }
-
-  found = malloc(sizeof(struct found_firmware));
-  if (!found) {
-    perror("Failed to allocate memory for firmware structure");
-    return;
-  }
-
-  found->fn = fn;
-  found->firmware = firmware;
-
-  g_hash_table_insert(best_firmware, key, found);
-}
-
-// look for firmware files in the given directory
-static void enum_firmware_dir(const char *dir_name) {
-  DIR *dir = opendir(dir_name);
-
-  if (!dir) {
-    if (errno == ENOENT) {
-      fprintf(stderr, "Firmware directory %s does not exist\n", dir_name);
-      return;
-    }
-    fprintf(
-      stderr, "Error opening directory %s: %s\n", dir_name, strerror(errno)
-    );
-    return;
-  }
-
-  struct dirent *entry;
-
-  while ((entry = readdir(dir))) {
-    char *full_fn;
-
-    // check if the file is a .bin file
-    if (strlen(entry->d_name) < 4 ||
-        strcmp(entry->d_name + strlen(entry->d_name) - 4, ".bin") != 0)
-      continue;
-
-    // check if the file is a regular file
-    if (entry->d_type == DT_UNKNOWN) {
-      struct stat st;
-      full_fn = g_build_filename(dir_name, entry->d_name, NULL);
-      if (stat(full_fn, &st) < 0) {
-        perror("stat");
-        g_free(full_fn);
-        continue;
-      }
-      if (!S_ISREG(st.st_mode)) {
-        g_free(full_fn);
-        continue;
-      }
-    } else if (entry->d_type != DT_REG) {
-      continue;
-    } else {
-      full_fn = g_build_filename(dir_name, entry->d_name, NULL);
-    }
-
-    struct scarlett2_firmware_header *firmware =
-      scarlett2_read_firmware_header(full_fn);
-
-    if (!firmware) {
-      fprintf(stderr, "Error reading firmware file %s\n", full_fn);
-      g_free(full_fn);
-      continue;
-    }
-
-    add_found_firmware(full_fn, firmware);
-  }
-
-  closedir(dir);
-}
-
-void scarlett2_enum_firmware(void) {
-  init_best_firmware();
-
-  const char *fw_dir = getenv("SCARLETT2_FIRMWARE_DIR");
-
-  if (!fw_dir)
-    fw_dir = SCARLETT2_FIRMWARE_DIR;
-  enum_firmware_dir(fw_dir);
+  scarlett2_free_firmware_header(firmware);
 }
 
 uint32_t scarlett2_get_best_firmware_version(uint32_t pid) {
-  struct found_firmware *found = g_hash_table_lookup(
-    best_firmware, GINT_TO_POINTER(pid)
+  const uint32_t *version = firmware_store_get_version(
+    FIRMWARE_GENERATION_SCARLETT2, pid
   );
-  if (!found)
-    return 0;
 
-  return found->firmware->firmware_version;
+  return version ? version[0] : 0;
 }
 
 struct scarlett2_firmware_file *scarlett2_get_best_firmware(uint32_t pid) {
-  struct found_firmware *found = g_hash_table_lookup(
-    best_firmware, GINT_TO_POINTER(pid)
+  const char *fn = firmware_store_get_filename(
+    FIRMWARE_GENERATION_SCARLETT2, pid
   );
-  if (!found)
+
+  if (!fn)
     return NULL;
 
-  return scarlett2_read_firmware_file(found->fn);
+  return scarlett2_read_firmware_file(fn);
 }

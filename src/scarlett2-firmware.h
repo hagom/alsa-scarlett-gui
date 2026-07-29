@@ -40,7 +40,8 @@ void scarlett2_free_firmware_file(
   struct scarlett2_firmware_file *firmware
 );
 
-void scarlett2_enum_firmware(void);
+/* Record a firmware file in the firmware store; takes ownership of fn */
+void scarlett2_store_firmware(char *fn);
 
 uint32_t scarlett2_get_best_firmware_version(uint32_t pid);
 struct scarlett2_firmware_file *scarlett2_get_best_firmware(uint32_t pid);

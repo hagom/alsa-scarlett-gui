@@ -282,7 +282,7 @@ struct alsa_card {
   // For scarlett4 (big Gen 4) devices with 4-valued versions
   uint32_t            firmware_version_4[4];
   uint32_t            esp_firmware_version[4];
-  uint32_t           *best_firmware_version_4;
+  const uint32_t     *best_firmware_version_4;
   snd_ctl_t          *handle;
   struct pollfd       pfd;
   GPtrArray          *elems;

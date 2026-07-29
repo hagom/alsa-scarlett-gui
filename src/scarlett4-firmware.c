@@ -3,12 +3,11 @@
 
 #include "scarlett4-firmware.h"
 
-#include <dirent.h>
-#include <errno.h>
+#include "firmware-store.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <arpa/inet.h>
 #include <glib.h>
 #include <openssl/sha.h>
@@ -48,14 +47,6 @@ int firmware_version_from_elem(struct alsa_elem *elem, uint32_t *parts) {
 
   return 1;
 }
-
-// Hash table to store the best firmware for each PID
-struct found_firmware {
-  char                         *fn;
-  struct scarlett4_firmware_container *container;
-};
-
-static GHashTable *best_firmware = NULL;
 
 static int verify_sha256(
   const unsigned char *data,
@@ -479,143 +470,42 @@ const char *scarlett4_firmware_type_to_string(enum scarlett4_firmware_type type)
   }
 }
 
-static void free_found_firmware(gpointer data) {
-  struct found_firmware *found = data;
-  free(found->fn);
-  scarlett4_free_firmware_container(found->container);
-  free(found);
-}
+/* Record fn in the firmware store, if it holds a usable header.
+ * Takes ownership of fn.
+ */
+void scarlett4_store_firmware(char *fn) {
+  struct scarlett4_firmware_container *container =
+    scarlett4_read_firmware_header(fn);
 
-static void init_best_firmware(void) {
-  if (best_firmware)
+  if (!container) {
+    g_free(fn);
     return;
+  }
 
-  best_firmware = g_hash_table_new_full(
-    g_direct_hash, g_direct_equal, NULL, free_found_firmware
+  firmware_store_add(
+    FIRMWARE_GENERATION_SCARLETT4,
+    container->usb_pid,
+    container->firmware_version,
+    fn
   );
+
+  scarlett4_free_firmware_container(container);
 }
 
-// Add a firmware file to the list of found firmware files,
-// if it's better than the one already found for the same device.
-static void add_found_firmware(
-  char                          *fn,
-  struct scarlett4_firmware_container *container
-) {
-  gpointer key = GINT_TO_POINTER(container->usb_pid);
-  struct found_firmware *found = g_hash_table_lookup(best_firmware, key);
-
-  // Already have a firmware file for this device?
-  if (found) {
-    // Lower or equal version, ignore
-    if (firmware_version_cmp(container->firmware_version,
-                             found->container->firmware_version) <= 0) {
-      free(fn);
-      scarlett4_free_firmware_container(container);
-      return;
-    }
-
-    // Higher version, replace
-    g_hash_table_remove(best_firmware, key);
-  }
-
-  found = malloc(sizeof(struct found_firmware));
-  if (!found) {
-    perror("Failed to allocate memory for firmware structure");
-    free(fn);
-    scarlett4_free_firmware_container(container);
-    return;
-  }
-
-  found->fn = fn;
-  found->container = container;
-
-  g_hash_table_insert(best_firmware, key, found);
-}
-
-// Look for firmware files in the given directory
-static void enum_firmware_dir(const char *dir_name) {
-  DIR *dir = opendir(dir_name);
-
-  if (!dir) {
-    if (errno != ENOENT)
-      fprintf(stderr, "Error opening directory %s: %s\n",
-              dir_name, strerror(errno));
-    return;
-  }
-
-  struct dirent *entry;
-
-  while ((entry = readdir(dir))) {
-    char *full_fn;
-
-    // Check if the file is a .bin file
-    if (strlen(entry->d_name) < 4 ||
-        strcmp(entry->d_name + strlen(entry->d_name) - 4, ".bin") != 0)
-      continue;
-
-    // Check if the file is a regular file
-    if (entry->d_type == DT_UNKNOWN) {
-      struct stat st;
-      full_fn = g_build_filename(dir_name, entry->d_name, NULL);
-      if (stat(full_fn, &st) < 0) {
-        perror("stat");
-        g_free(full_fn);
-        continue;
-      }
-      if (!S_ISREG(st.st_mode)) {
-        g_free(full_fn);
-        continue;
-      }
-    } else if (entry->d_type != DT_REG) {
-      continue;
-    } else {
-      full_fn = g_build_filename(dir_name, entry->d_name, NULL);
-    }
-
-    // Read the firmware header
-    struct scarlett4_firmware_container *container = scarlett4_read_firmware_header(full_fn);
-    if (!container) {
-      g_free(full_fn);
-      continue;
-    }
-
-    add_found_firmware(full_fn, container);
-  }
-
-  closedir(dir);
-}
-
-void scarlett4_enum_firmware(void) {
-  init_best_firmware();
-
-  // Check for override directory
-  const char *override_dir = getenv("SCARLETT4_FIRMWARE_DIR");
-  if (override_dir) {
-    enum_firmware_dir(override_dir);
-    return;
-  }
-
-  enum_firmware_dir(SCARLETT4_FIRMWARE_DIR);
-}
-
-uint32_t *scarlett4_get_best_firmware_version(uint32_t pid) {
-  struct found_firmware *found = g_hash_table_lookup(
-    best_firmware, GINT_TO_POINTER(pid)
-  );
-  if (!found)
-    return NULL;
-  return found->container->firmware_version;
+const uint32_t *scarlett4_get_best_firmware_version(uint32_t pid) {
+  return firmware_store_get_version(FIRMWARE_GENERATION_SCARLETT4, pid);
 }
 
 struct scarlett4_firmware_container *scarlett4_get_best_firmware(uint32_t pid) {
-  struct found_firmware *found = g_hash_table_lookup(
-    best_firmware, GINT_TO_POINTER(pid)
+  const char *fn = firmware_store_get_filename(
+    FIRMWARE_GENERATION_SCARLETT4, pid
   );
-  if (!found)
+
+  if (!fn)
     return NULL;
 
   // Read the full firmware file (with data)
-  return scarlett4_read_firmware_file(found->fn);
+  return scarlett4_read_firmware_file(fn);
 }
 
 // Find a firmware section by type in a container
@@ -630,15 +520,10 @@ static struct scarlett4_firmware *find_section(
 }
 
 int scarlett4_is_mid_upgrade(struct alsa_card *card) {
-  struct found_firmware *found = g_hash_table_lookup(
-    best_firmware, GINT_TO_POINTER(card->pid)
-  );
-  if (!found)
-    return 0;
 
-  // Read the full container (enumeration only stores metadata)
+  // Read the full container; the store only holds the file name
   struct scarlett4_firmware_container *container =
-    scarlett4_read_firmware_file(found->fn);
+    scarlett4_get_best_firmware(card->pid);
   if (!container)
     return 0;
 
@@ -654,14 +539,16 @@ int scarlett4_is_mid_upgrade(struct alsa_card *card) {
   }
 
   // Check if leapfrog is loaded (device firmware == leapfrog version)
-  int leapfrog_loaded = firmware_version_cmp(
-    card->firmware_version_4, leapfrog_fw->firmware_version
-  ) == 0;
+  int leapfrog_loaded =
+    firmware_version_cmp(
+      card->firmware_version_4, leapfrog_fw->firmware_version
+    ) == 0;
 
   // Check if ESP needs update
-  int need_esp = firmware_version_cmp(
-    card->esp_firmware_version, esp_fw->firmware_version
-  ) != 0;
+  int need_esp =
+    firmware_version_cmp(
+      card->esp_firmware_version, esp_fw->firmware_version
+    ) != 0;
 
   fprintf(stderr, "is_mid_upgrade: leapfrog_loaded=%d need_esp=%d\n",
     leapfrog_loaded, need_esp);
