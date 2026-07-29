@@ -11,7 +11,8 @@
 // Returns DEFAULT_LEVELS_INTERVAL_MS for unrecognised values.
 int levels_hz_to_ms(int hz);
 
-// Load per-card preferences from optional state into card struct
-void load_preferences(struct alsa_card *card);
+// Load the display preferences from optional state into the card struct
+void load_display_prefs(struct alsa_card *card);
 
-GtkWidget *create_preferences_controls(struct alsa_card *card);
+// Adds the Display tab to the configuration notebook
+void add_display_tab(GtkWidget *notebook, struct alsa_card *card);

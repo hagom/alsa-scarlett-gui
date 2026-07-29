@@ -7,7 +7,6 @@
 #include "hardware.h"
 #include "iface-mixer.h"
 #include "presets.h"
-#include "window-preferences.h"
 #include "routing-lines.h"
 #include "stereo-link.h"
 #include "stringhelper.h"
@@ -2552,15 +2551,6 @@ static gboolean window_dsp_close_request(GtkWindow *w, gpointer data) {
   return true;
 }
 
-static gboolean window_preferences_close_request(GtkWindow *w, gpointer data) {
-  struct alsa_card *card = data;
-
-  gtk_widget_activate_action(
-    GTK_WIDGET(card->window_main), "win.preferences", NULL
-  );
-  return true;
-}
-
 // wrap a scrolled window around the controls
 static void create_scrollable_window(GtkWidget *window, GtkWidget *controls) {
   GtkWidget *scrolled_window = gtk_scrolled_window_new();
@@ -2667,16 +2657,6 @@ GtkWidget *create_iface_mixer_main(struct alsa_card *card) {
     GtkWidget *dsp = create_dsp_controls(card);
     gtk_window_set_child(GTK_WINDOW(card->window_dsp), dsp);
   }
-
-  card->window_preferences = create_subwindow(
-    card, "Preferences",
-    G_CALLBACK(window_preferences_close_request)
-  );
-
-  GtkWidget *preferences = create_preferences_controls(card);
-  gtk_window_set_child(
-    GTK_WINDOW(card->window_preferences), preferences
-  );
 
   return top;
 }

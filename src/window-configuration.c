@@ -15,6 +15,7 @@
 #include "config-autogain.h"
 #include "config-device-name.h"
 #include "config-device-settings.h"
+#include "config-display.h"
 #include "config-front-panel.h"
 #include "config-io.h"
 #include "config-monitor-groups.h"
@@ -162,6 +163,9 @@ GtkWidget *create_configuration_controls(struct alsa_card *card) {
 
   // Startup tab
   add_startup_tab(top_notebook, card);
+
+  // Display tab
+  add_display_tab(top_notebook, card);
 
   // Add top notebook to main container (only if it has pages)
   if (gtk_notebook_get_n_pages(GTK_NOTEBOOK(top_notebook)) > 0) {

@@ -4,6 +4,7 @@
 #include <gtk/gtk.h>
 #include <string.h>
 
+#include "config-display.h"
 #include "iface-mixer.h"
 #include "iface-no-mixer.h"
 #include "iface-none.h"
@@ -19,7 +20,6 @@
 #include "window-routing.h"
 #include "window-startup.h"
 #include "optional-controls.h"
-#include "window-preferences.h"
 
 static GtkWidget *no_cards_window;
 static int window_count;
@@ -141,10 +141,6 @@ static void cleanup_subwindows(struct alsa_card *card) {
     gtk_window_destroy(GTK_WINDOW(card->window_dsp));
     card->window_dsp = NULL;
   }
-  if (card->window_preferences) {
-    gtk_window_destroy(GTK_WINDOW(card->window_preferences));
-    card->window_preferences = NULL;
-  }
 }
 
 // Release everything hanging off the main window. The caller must
@@ -238,10 +234,10 @@ static void create_card_window(struct alsa_card *card) {
       firmware_version_cmp(current, card->best_firmware_version_4) < 0;
   }
 
-  // set has_levels flag and load preferences before building UI
+  // set has_levels flag and load display prefs before building UI
   card->has_levels =
     !!get_elem_by_name(card->elems, "Firmware Version");
-  load_preferences(card);
+  load_display_prefs(card);
 
   // Firmware update required
   // or firmware version available and in MSD mode
@@ -300,8 +296,6 @@ static void create_card_window(struct alsa_card *card) {
     add_configuration_action_map(card);
   if (has_mixer)
     add_mixer_action_map(card);
-  if (has_mixer)
-    add_preferences_action_map(card);
   if (card->window_dsp)
     add_dsp_action_map(card);
   if (card->device)
