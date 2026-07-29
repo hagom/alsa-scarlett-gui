@@ -4,19 +4,15 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 
+#include "app-settings.h"
 #include "welcome.h"
 #include "gtkhelper.h"
 
 #define BETA_VERSION "1.0beta"
 #define WELCOME_FILE "welcome.conf"
 
-static char *get_config_dir(void) {
-  const char *config_home = g_get_user_config_dir();
-  return g_build_filename(config_home, "alsa-scarlett-gui", NULL);
-}
-
 static char *get_welcome_path(void) {
-  char *config_dir = get_config_dir();
+  char *config_dir = app_settings_get_config_dir();
   char *path = g_build_filename(config_dir, WELCOME_FILE, NULL);
   g_free(config_dir);
   return path;
@@ -57,25 +53,9 @@ static gboolean should_suppress(void) {
   return suppress;
 }
 
-static GKeyFile *load_welcome_keyfile(char **out_path) {
-  char *config_dir = get_config_dir();
-
-  if (g_mkdir_with_parents(config_dir, 0755) < 0) {
-    g_warning("Failed to create config directory: %s", config_dir);
-    g_free(config_dir);
-    return NULL;
-  }
-  g_free(config_dir);
-
-  *out_path = get_welcome_path();
-  GKeyFile *key_file = g_key_file_new();
-  g_key_file_load_from_file(key_file, *out_path, G_KEY_FILE_NONE, NULL);
-  return key_file;
-}
-
 static void set_snooze_date(void) {
   char *path;
-  GKeyFile *key_file = load_welcome_keyfile(&path);
+  GKeyFile *key_file = app_settings_load_keyfile(WELCOME_FILE, &path);
   if (!key_file)
     return;
 
@@ -90,7 +70,7 @@ static void set_snooze_date(void) {
 
 static void set_dismissed(void) {
   char *path;
-  GKeyFile *key_file = load_welcome_keyfile(&path);
+  GKeyFile *key_file = app_settings_load_keyfile(WELCOME_FILE, &path);
   if (!key_file)
     return;
 
