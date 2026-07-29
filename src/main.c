@@ -40,6 +40,7 @@ static void startup(GtkApplication *app, gpointer user_data) {
   load_css();
 
   firmware_enum_all();
+  window_iface_init();
   alsa_init();
 
   create_no_card_window();

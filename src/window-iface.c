@@ -184,7 +184,7 @@ static gboolean main_window_close_request(GtkWindow *w, gpointer data) {
   return FALSE;
 }
 
-void create_card_window(struct alsa_card *card) {
+static void create_card_window(struct alsa_card *card) {
   if (no_cards_window) {
     gtk_window_destroy(GTK_WINDOW(no_cards_window));
     no_cards_window = NULL;
@@ -342,7 +342,7 @@ void create_no_card_window(void) {
 }
 
 // Close a card's main window and everything hanging off it
-void close_card_window(struct alsa_card *card) {
+static void close_card_window(struct alsa_card *card) {
   GtkWidget *old_window = card->window_main;
 
   teardown_main_window_state(card);
@@ -354,11 +354,33 @@ void close_card_window(struct alsa_card *card) {
   window_count--;
 }
 
-void destroy_card_window(struct alsa_card *card) {
+static void destroy_card_window(struct alsa_card *card) {
   close_card_window(card);
 
   // if last window, display the "no card found" blank window
   create_no_card_window();
+}
+
+// alsa.c reports card lifecycle events; presenting them is this file's
+// business
+static void card_lifecycle_ready(struct alsa_card *card) {
+  create_card_window(card);
+}
+
+static void card_lifecycle_closing(struct alsa_card *card, int gone) {
+  if (gone)
+    destroy_card_window(card);
+  else
+    close_card_window(card);
+}
+
+void window_iface_init(void) {
+  static const struct alsa_card_lifecycle lifecycle = {
+    .ready = card_lifecycle_ready,
+    .closing = card_lifecycle_closing
+  };
+
+  alsa_set_card_lifecycle(&lifecycle);
 }
 
 void check_modal_window_closed(void) {

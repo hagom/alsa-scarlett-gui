@@ -10,7 +10,6 @@
 #include "scarlett4-firmware.h"
 #include "scarlett2-ioctls.h"
 #include "stringhelper.h"
-#include "window-iface.h"
 #include "optional-controls.h"
 #include "custom-names.h"
 #include "port-enable.h"
@@ -67,6 +66,9 @@ struct reopen_callback {
 
 // hash table for cards being rebooted
 GHashTable *reopen_callbacks;
+
+// observer notified when a card becomes presentable or goes away
+static const struct alsa_card_lifecycle *card_lifecycle;
 
 // forward declaration
 void alsa_elem_change(struct alsa_elem *elem);
@@ -1250,8 +1252,9 @@ static void card_destroy_callback(void *data) {
     card->levels_timer = 0;
   }
 
-  // close the windows associated with this card
-  destroy_card_window(card);
+  // tear down the card's presentation
+  if (card_lifecycle)
+    card_lifecycle->closing(card, 1);
 
   // free all elements and their callbacks
   if (card->elems) {
@@ -1422,7 +1425,7 @@ static void complete_card_init(struct alsa_card *card) {
   // Save initial configuration on first-ever load
   save_initial_config(card);
 
-  create_card_window(card);
+  alsa_card_ready(card);
 }
 
 // Check if the Firmware Version control has a TLV and is locked,
@@ -1469,8 +1472,10 @@ static void check_driver_init(
   // The driver is initialised; update the card's driver type
   card->driver_type = DRIVER_TYPE_SOCKET;
 
-  // Close the placeholder window shown while waiting for the driver
-  close_card_window(card);
+  // Discard the placeholder presentation shown while waiting for the
+  // driver; complete_card_init() reports the card ready again
+  if (card_lifecycle)
+    card_lifecycle->closing(card, 0);
 
   // Complete the card initialisation
   complete_card_init(card);
@@ -1752,9 +1757,10 @@ static void card_init(struct alsa_card *card) {
 
   card->driver_type = get_driver_type(card);
 
-  // Driver not ready? Create the iface-waiting window
+  // Driver not ready? The card is presentable as-is; the waiting
+  // interface is shown until check_driver_init() takes over
   if (card->driver_type == DRIVER_TYPE_SOCKET_UNINIT) {
-    create_card_window(card);
+    alsa_card_ready(card);
     return;
   }
 
@@ -1870,6 +1876,15 @@ void alsa_init(void) {
   );
   alsa_inotify_init();
   alsa_scan_cards();
+}
+
+void alsa_set_card_lifecycle(const struct alsa_card_lifecycle *lifecycle) {
+  card_lifecycle = lifecycle;
+}
+
+void alsa_card_ready(struct alsa_card *card) {
+  if (card_lifecycle)
+    card_lifecycle->ready(card);
 }
 
 void alsa_register_reopen_callback(

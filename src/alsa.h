@@ -468,6 +468,24 @@ void alsa_set_lr_nums(struct alsa_card *card);
 void alsa_get_routing_controls(struct alsa_card *card);
 void alsa_init_mixer_gains_cache(struct alsa_card *card);
 
+// Card lifecycle observer. alsa.c reports what happened to a card and
+// leaves the presentation decisions to whoever registered these; it
+// never calls into the GUI itself.
+//
+// ready:    the card's controls are known and it can be presented
+// closing:  the card's presentation must be torn down, either because
+//           the card is going away (gone) or because it is about to be
+//           reported ready again with a different interface (!gone)
+struct alsa_card_lifecycle {
+  void (*ready)(struct alsa_card *card);
+  void (*closing)(struct alsa_card *card, int gone);
+};
+
+void alsa_set_card_lifecycle(const struct alsa_card_lifecycle *lifecycle);
+
+// notify the lifecycle observer that a card can be presented
+void alsa_card_ready(struct alsa_card *card);
+
 // init
 void alsa_init(void);
 

@@ -4,7 +4,6 @@
 #include "alsa.h"
 #include "alsa-sim.h"
 #include "error.h"
-#include "window-iface.h"
 #include "optional-controls.h"
 #include "custom-names.h"
 #include "port-enable.h"
@@ -536,5 +535,5 @@ void create_sim_from_file(GtkWindow *w, char *fn) {
   port_enable_init(card);
   stereo_link_init(card);
 
-  create_card_window(card);
+  alsa_card_ready(card);
 }
