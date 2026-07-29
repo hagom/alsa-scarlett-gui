@@ -738,3 +738,20 @@ button.toggle {
   border-radius: 10px;
   border: 2px solid #ff0000;
 }
+
+/* For text meant to be read literally, character by character */
+.monospace {
+  font-family: monospace;
+}
+
+/* Incidental text: present, but not competing with the question */
+.consent-aside {
+  opacity: 0.7;
+}
+
+/* An offer of detail, distinct from the text asking the question */
+.consent-detail-label {
+  font-size: smaller;
+  font-weight: bold;
+  opacity: 0.8;
+}

@@ -65,6 +65,14 @@ typedef void (*online_update_download_cb)(
  */
 char *online_update_index_url(gboolean include_usage_info);
 
+/* A dev parameter with placeholder values, for showing the user what a
+ * device is reported as when none is attached to report.
+ */
+#define ONLINE_UPDATE_SAMPLE_DEV "dev=xxxx:0.0.0000.0:0123456789abcdef"
+
+// Whether a dev parameter would be sent for any attached device
+gboolean online_update_reports_a_device(void);
+
 /* Fetch and parse the update index, caching it on success.
  *
  * The callback is invoked exactly once: from the main loop once the

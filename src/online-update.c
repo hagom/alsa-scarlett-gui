@@ -1174,11 +1174,12 @@ static void append_os_param(GString *query) {
  * consent dialog and FAQ both show this request line to the user for
  * them to read: "821e%3A3.0.2761.0%3A..." defeats that purpose.
  */
-static void append_dev_params(GString *query) {
+static int append_dev_params(GString *query) {
   GArray *cards = alsa_get_cards();
+  int count = 0;
 
   if (!cards)
-    return;
+    return 0;
 
   for (guint i = 0; i < cards->len; i++) {
     struct alsa_card *card = g_array_index(cards, struct alsa_card *, i);
@@ -1199,11 +1200,23 @@ static void append_dev_params(GString *query) {
     );
 
     append_param_allowing(query, "dev", dev, ":");
+    count++;
 
     g_free(dev);
     g_free(hash);
     g_free(version);
   }
+
+  return count;
+}
+
+gboolean online_update_reports_a_device(void) {
+  GString *discard = g_string_new(NULL);
+  int count = append_dev_params(discard);
+
+  g_string_free(discard, TRUE);
+
+  return count > 0;
 }
 
 char *online_update_index_url(gboolean include_usage_info) {
