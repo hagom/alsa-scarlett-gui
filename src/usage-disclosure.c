@@ -3,10 +3,16 @@
 
 #ifdef HAVE_ONLINE_UPDATE
 
+#include "alsa.h"
 #include "online-update.h"
 #include "usage-disclosure.h"
 
-void add_detail_expander(
+/* Every request line on display. The dev parameters depend on which
+ * devices are attached, so they are all rewritten when that changes.
+ */
+static GSList *request_lines;
+
+GtkWidget *add_detail_expander(
   GtkWidget  *content,
   const char *label,
   const char *text,
@@ -39,13 +45,15 @@ void add_detail_expander(
   gtk_box_append(GTK_BOX(box), detail);
 
   if (!footnote)
-    return;
+    return detail;
 
   GtkWidget *note = gtk_label_new(footnote);
 
   gtk_widget_add_css_class(note, "consent-aside");
   gtk_label_set_xalign(GTK_LABEL(note), 0.0);
   gtk_box_append(GTK_BOX(box), note);
+
+  return detail;
 }
 
 /* The request line, one query parameter per line so that a reader can
@@ -76,6 +84,22 @@ static char *request_line_text(void) {
   return g_string_free(text, FALSE);
 }
 
+static void forget_request_line(gpointer data, GObject *label) {
+  request_lines = g_slist_remove(request_lines, label);
+}
+
+static void devices_changed(void) {
+  if (!request_lines)
+    return;
+
+  char *text = request_line_text();
+
+  for (GSList *l = request_lines; l; l = l->next)
+    gtk_label_set_text(GTK_LABEL(l->data), text);
+
+  g_free(text);
+}
+
 void add_usage_disclosure_expanders(GtkWidget *content) {
 
   /* Plain text, not markup: the URL's "&" separators would be read as
@@ -83,13 +107,28 @@ void add_usage_disclosure_expanders(GtkWidget *content) {
    */
   char *request_line = request_line_text();
 
-  add_detail_expander(
+  GtkWidget *detail = add_detail_expander(
     content, "Show what is sent", request_line, TRUE,
     "dev is your device's USB product id, its firmware version, and the\n"
     "first 16 characters of the SHA256 of its serial number (enough to\n"
     "de-dupe)."
   );
   g_free(request_line);
+
+  /* The request line names the attached devices, so it is rewritten
+   * whenever they change. Registered on first use rather than from an
+   * init function: the consent dialog shows a request line before the
+   * rest of the app is set up, and it has to track devices too.
+   */
+  static gboolean registered;
+
+  if (!registered) {
+    alsa_add_cards_changed_callback(devices_changed);
+    registered = TRUE;
+  }
+
+  request_lines = g_slist_prepend(request_lines, detail);
+  g_object_weak_ref(G_OBJECT(detail), forget_request_line, NULL);
 
   add_detail_expander(
     content, "Show how it is handled",

@@ -15,11 +15,11 @@
  * none of this exists there.
  */
 
-/* A collapsed detail section appended to content. Monospace suits text
- * meant to be read literally, such as the request line. footnote may be
- * NULL.
+/* A collapsed detail section appended to content, returning the label
+ * holding its text. Monospace suits text meant to be read literally,
+ * such as the request line. footnote may be NULL.
  */
-void add_detail_expander(
+GtkWidget *add_detail_expander(
   GtkWidget  *content,
   const char *label,
   const char *text,

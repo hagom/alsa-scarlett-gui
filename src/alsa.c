@@ -70,6 +70,17 @@ GHashTable *reopen_callbacks;
 // observer notified when a card becomes presentable or goes away
 static const struct alsa_card_lifecycle *card_lifecycle;
 
+// callbacks notified when the set of cards changes
+static GSList *cards_changed_callbacks;
+
+static void cards_changed(void) {
+  for (GSList *l = cards_changed_callbacks; l; l = l->next) {
+    void (*callback)(void) = l->data;
+
+    callback();
+  }
+}
+
 // forward declaration
 void alsa_elem_change(struct alsa_elem *elem);
 
@@ -1323,6 +1334,8 @@ static void card_destroy_callback(void *data) {
   if (card_lifecycle)
     card_lifecycle->closing(card, 1);
 
+  cards_changed();
+
   // free all elements and their callbacks
   if (card->elems) {
     for (int i = 0; i < card->elems->len; i++) {
@@ -1942,9 +1955,17 @@ void alsa_set_card_lifecycle(const struct alsa_card_lifecycle *lifecycle) {
   card_lifecycle = lifecycle;
 }
 
+void alsa_add_cards_changed_callback(void (*callback)(void)) {
+  cards_changed_callbacks = g_slist_prepend(
+    cards_changed_callbacks, callback
+  );
+}
+
 void alsa_card_ready(struct alsa_card *card) {
   if (card_lifecycle)
     card_lifecycle->ready(card);
+
+  cards_changed();
 }
 
 void alsa_register_reopen_callback(

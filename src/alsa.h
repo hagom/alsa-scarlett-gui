@@ -499,6 +499,15 @@ void alsa_set_card_lifecycle(const struct alsa_card_lifecycle *lifecycle);
 // notify the lifecycle observer that a card can be presented
 void alsa_card_ready(struct alsa_card *card);
 
+/* Called whenever a card has been added to or removed from the card
+ * list, for anything derived from the set of connected cards rather than
+ * from one of them. There may be any number of these, and each is called
+ * from the moment it is added: cards are discovered before the
+ * presentation observer above exists, so anything shown during startup
+ * has to be told this way.
+ */
+void alsa_add_cards_changed_callback(void (*callback)(void));
+
 // init
 void alsa_init(void);
 
