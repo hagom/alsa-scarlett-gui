@@ -107,24 +107,9 @@ static void update_window_titles(struct alsa_elem *elem, void *private) {
 
 // Clean up gain widget lists
 static void cleanup_gain_widget_lists(struct alsa_card *card) {
-  for (GList *l = card->input_gain_widgets; l != NULL; l = l->next)
-    g_free(l->data);
-  g_list_free(card->input_gain_widgets);
-  card->input_gain_widgets = NULL;
-
-  for (GList *l = card->output_gain_widgets; l != NULL; l = l->next)
-    g_free(l->data);
-  g_list_free(card->output_gain_widgets);
-  card->output_gain_widgets = NULL;
-
-  for (GList *l = card->mixer_gain_widgets; l != NULL; l = l->next) {
-    struct mixer_gain_widget *mg = l->data;
-    if (mg->widget)
-      g_object_unref(mg->widget);
-    g_free(mg);
-  }
-  g_list_free(card->mixer_gain_widgets);
-  card->mixer_gain_widgets = NULL;
+  cleanup_input_gain_widgets(card);
+  cleanup_output_gain_widgets(card);
+  cleanup_mixer_gain_widgets(card);
 
   for (GList *l = card->dsp_comp_widgets; l != NULL; l = l->next)
     g_free(l->data);

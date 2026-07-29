@@ -28,3 +28,7 @@ void update_mixer_availability(struct alsa_card *card, int available);
 // Recreate mixer widgets when stereo state changes
 // This destroys existing widgets and creates new ones based on current stereo
 void recreate_mixer_widgets(struct alsa_card *card);
+
+// Free the mixer gain widget list, deregistering the ALSA callbacks and
+// releasing the reference each entry holds on its widget
+void cleanup_mixer_gain_widgets(struct alsa_card *card);

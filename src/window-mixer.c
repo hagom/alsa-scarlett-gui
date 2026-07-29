@@ -1041,11 +1041,7 @@ static void populate_mixer_gain_widgets(struct alsa_card *card) {
     g_list_reverse(card->mixer_gain_widgets);
 }
 
-GtkWidget *create_mixer_controls(struct alsa_card *card) {
-  GtkWidget *top = gtk_frame_new(NULL);
-  gtk_widget_add_css_class(top, "window-frame");
-
-  // clear any existing mixer gain widgets from previous window
+void cleanup_mixer_gain_widgets(struct alsa_card *card) {
   for (GList *l = card->mixer_gain_widgets; l != NULL; l = l->next) {
     struct mixer_gain_widget *mg = l->data;
     if (mg->widget) {
@@ -1056,6 +1052,13 @@ GtkWidget *create_mixer_controls(struct alsa_card *card) {
   }
   g_list_free(card->mixer_gain_widgets);
   card->mixer_gain_widgets = NULL;
+}
+
+GtkWidget *create_mixer_controls(struct alsa_card *card) {
+  GtkWidget *top = gtk_frame_new(NULL);
+  gtk_widget_add_css_class(top, "window-frame");
+
+  cleanup_mixer_gain_widgets(card);
 
   // create overlay to hold the grid and glow layer
   GtkWidget *mixer_overlay = card->mixer_overlay = gtk_overlay_new();
@@ -1517,19 +1520,13 @@ void recreate_mixer_widgets(struct alsa_card *card) {
 
   GtkGrid *grid = GTK_GRID(card->mixer_grid);
 
-  // Clear existing mixer gain widgets
+  // Detach the existing widgets from the grid, then discard them
   for (GList *l = card->mixer_gain_widgets; l != NULL; l = l->next) {
     struct mixer_gain_widget *mg = l->data;
-    if (mg->widget) {
-      if (gtk_widget_get_parent(mg->widget) == GTK_WIDGET(grid))
-        gtk_grid_remove(grid, mg->widget);
-      cleanup_gain_widget(mg->widget);
-      g_object_unref(mg->widget);
-    }
-    g_free(mg);
+    if (mg->widget && gtk_widget_get_parent(mg->widget) == GTK_WIDGET(grid))
+      gtk_grid_remove(grid, mg->widget);
   }
-  g_list_free(card->mixer_gain_widgets);
-  card->mixer_gain_widgets = NULL;
+  cleanup_mixer_gain_widgets(card);
 
   populate_mixer_gain_widgets(card);
 

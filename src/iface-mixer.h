@@ -20,3 +20,9 @@ struct output_gain_widget {
 };
 
 GtkWidget *create_iface_mixer_main(struct alsa_card *card);
+
+// Free the input and output gain widget lists, deregistering the ALSA
+// callbacks held by each gain widget. The widgets themselves are owned
+// by their containers.
+void cleanup_input_gain_widgets(struct alsa_card *card);
+void cleanup_output_gain_widgets(struct alsa_card *card);

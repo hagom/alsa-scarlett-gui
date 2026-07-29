@@ -2596,19 +2596,30 @@ static void create_scrollable_window(GtkWidget *window, GtkWidget *controls) {
   gtk_window_set_resizable(GTK_WINDOW(window), TRUE);
 }
 
-GtkWidget *create_iface_mixer_main(struct alsa_card *card) {
-
-  // clear any existing input gain widgets from previous interface
-  for (GList *l = card->input_gain_widgets; l != NULL; l = l->next)
-    g_free(l->data);
+void cleanup_input_gain_widgets(struct alsa_card *card) {
+  for (GList *l = card->input_gain_widgets; l != NULL; l = l->next) {
+    struct input_gain_widget *ig = l->data;
+    cleanup_gain_widget(ig->widget);
+    g_free(ig);
+  }
   g_list_free(card->input_gain_widgets);
   card->input_gain_widgets = NULL;
+}
 
-  // clear any existing output gain widgets from previous interface
-  for (GList *l = card->output_gain_widgets; l != NULL; l = l->next)
-    g_free(l->data);
+void cleanup_output_gain_widgets(struct alsa_card *card) {
+  for (GList *l = card->output_gain_widgets; l != NULL; l = l->next) {
+    struct output_gain_widget *og = l->data;
+    cleanup_gain_widget(og->widget);
+    g_free(og);
+  }
   g_list_free(card->output_gain_widgets);
   card->output_gain_widgets = NULL;
+}
+
+GtkWidget *create_iface_mixer_main(struct alsa_card *card) {
+
+  cleanup_input_gain_widgets(card);
+  cleanup_output_gain_widgets(card);
 
   card->has_speaker_switching =
     get_elem_by_name(card->elems, "Speaker Switching Playback Enum") ||
