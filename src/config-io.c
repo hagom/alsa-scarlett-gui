@@ -1424,7 +1424,8 @@ static int has_io_for_category(
   int               check_sources,
   int               check_sinks
 ) {
-  if (check_sources) {
+  // Devices without a routing matrix never populate these
+  if (check_sources && card->routing_srcs) {
     for (int i = 0; i < card->routing_srcs->len; i++) {
       struct routing_src *src = &g_array_index(
         card->routing_srcs, struct routing_src, i
@@ -1436,7 +1437,7 @@ static int has_io_for_category(
     }
   }
 
-  if (check_sinks) {
+  if (check_sinks && card->routing_snks) {
     for (int i = 0; i < card->routing_snks->len; i++) {
       struct routing_snk *snk = &g_array_index(
         card->routing_snks, struct routing_snk, i
