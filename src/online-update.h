@@ -52,6 +52,18 @@ typedef void (*online_update_download_cb)(
   gpointer    user_data
 );
 
+/* The exact URL an update check requests, including the census query
+ * parameters. "prog" and "ver" identify the client on every check;
+ * "kernel", "os" and one "dev" per connected device are added only
+ * when include_usage_info is true.
+ *
+ * The consent dialog shows the user the literal request line, so it
+ * must build it with this same function: there is no second
+ * implementation that could describe something other than what is
+ * sent. Free with g_free().
+ */
+char *online_update_index_url(gboolean include_usage_info);
+
 /* Fetch and parse the update index, caching it on success.
  *
  * The callback is invoked exactly once: from the main loop once the
@@ -62,6 +74,7 @@ typedef void (*online_update_download_cb)(
  * whether that window is still open).
  */
 void online_update_fetch_index(
+  gboolean               include_usage_info,
   online_update_index_cb callback,
   gpointer               user_data
 );

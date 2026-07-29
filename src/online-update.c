@@ -13,12 +13,19 @@
 #include <json-glib/json-glib.h>
 #include <libsoup/soup.h>
 
+#include "alsa.h"
 #include "online-update.h"
 
 #define INDEX_URL "https://fr.b4.vu/scarlett/v1/index.json"
 #define TIMEOUT_SECONDS 10
 
-// How stale the cached index must be before checking again
+// Leading hex characters of SHA256(serial) sent as the census's
+// device identifier
+#define SERIAL_HASH_CHARS 16
+
+/* How stale the cached index must be before checking again. This is
+ * also the census ping's frequency, the ping riding on the fetch.
+ */
 #define CHECK_INTERVAL_SECONDS (24 * 60 * 60)
 
 // Response bodies are read into memory, so refuse anything larger
@@ -907,13 +914,181 @@ static void fetch_index_done(
   }
 }
 
+/* Append "&key=value" with the value percent-encoded. Every value goes
+ * through here, including ones we generate ourselves: most come from
+ * the system (uname, /etc/os-release, the build's VERSION) and could
+ * otherwise inject a separator and forge extra parameters. A rule
+ * about which fields are safe to skip would not survive maintenance.
+ *
+ * allowed lists characters to leave literal, or is NULL for none.
+ */
+static void append_param_allowing(
+  GString    *query,
+  const char *key,
+  const char *value,
+  const char *allowed
+) {
+  char *escaped = g_uri_escape_string(value, allowed, FALSE);
+
+  g_string_append_printf(query, "&%s=%s", key, escaped);
+  g_free(escaped);
+}
+
+static void append_param(
+  GString    *query,
+  const char *key,
+  const char *value
+) {
+  append_param_allowing(query, key, value, NULL);
+}
+
+/* Read one KEY=value from /etc/os-release.
+ *
+ * That file is shell syntax, not INI, so GKeyFile cannot read it: it
+ * hands back values with their quotes still attached, turning
+ * VERSION_ID="12" into os=debian-%2212%22. The mistake hides easily,
+ * because distributions that leave ID and VERSION_ID unquoted (Fedora
+ * among them) parse correctly and make GKeyFile look adequate.
+ *
+ * Only the subset needed here is handled: a single-line value, either
+ * bare or wholly quoted, with no escape sequences — which is what ID
+ * and VERSION_ID are in practice.
+ */
+static char *get_os_release_value(const char *data, const char *key) {
+  char  *prefix = g_strconcat(key, "=", NULL);
+  char **lines = g_strsplit(data, "\n", -1);
+  char  *value = NULL;
+
+  for (int i = 0; lines[i] && !value; i++) {
+    if (!g_str_has_prefix(lines[i], prefix))
+      continue;
+
+    char *raw = g_strstrip(g_strdup(lines[i] + strlen(prefix)));
+    gsize len = strlen(raw);
+
+    if (len >= 2 &&
+        (raw[0] == '"' || raw[0] == '\'') &&
+        raw[len - 1] == raw[0]) {
+      value = g_strndup(raw + 1, len - 2);
+      g_free(raw);
+    } else {
+      value = raw;
+    }
+
+    // A key present but empty is no more useful than one absent
+    if (!*value) {
+      g_free(value);
+      value = NULL;
+      break;
+    }
+  }
+
+  g_strfreev(lines);
+  g_free(prefix);
+
+  return value;
+}
+
+/* "os" is sent only when both components are known. Half a record
+ * (fedora- or -44) would pollute the distro tallies, whereas an
+ * absent parameter unambiguously means "not determinable". Rolling
+ * releases such as Arch legitimately have no VERSION_ID, so this is a
+ * normal outcome and must not be logged.
+ */
+static void append_os_param(GString *query) {
+  char *data = NULL;
+
+  if (!g_file_get_contents("/etc/os-release", &data, NULL, NULL))
+    return;
+
+  char *id = get_os_release_value(data, "ID");
+  char *version_id = get_os_release_value(data, "VERSION_ID");
+
+  if (id && version_id) {
+    char *os = g_strconcat(id, "-", version_id, NULL);
+
+    append_param(query, "os", os);
+    g_free(os);
+  }
+
+  g_free(version_id);
+  g_free(id);
+  g_free(data);
+}
+
+/* One "dev" parameter per connected device, as pid:version:hash.
+ *
+ * The hash is the first 16 hex characters of SHA256(serial): raw
+ * serials never leave the machine, and a truncated hash is ample to
+ * deduplicate reports and follow one device over time.
+ *
+ * Devices with no readable serial are skipped rather than sent with a
+ * placeholder, which would collide every such device into a single
+ * tally that reads as one hyperactive install; losing them is a known
+ * undercount instead. Simulated cards are not connected devices.
+ *
+ * The ":" separators are left literal. A colon carries no meaning in a
+ * query string, so escaping it would guard against nothing, and the
+ * consent dialog and FAQ both show this request line to the user for
+ * them to read: "821e%3A3.0.2761.0%3A..." defeats that purpose.
+ */
+static void append_dev_params(GString *query) {
+  GArray *cards = alsa_get_cards();
+
+  if (!cards)
+    return;
+
+  for (guint i = 0; i < cards->len; i++) {
+    struct alsa_card *card = g_array_index(cards, struct alsa_card *, i);
+
+    if (!card || card->num == SIMULATED_CARD_NUM || !card->serial)
+      continue;
+
+    char *version = card_firmware_version(card);
+
+    if (!version)
+      continue;
+
+    char *hash = g_compute_checksum_for_string(
+      G_CHECKSUM_SHA256, card->serial, -1
+    );
+    char *dev = g_strdup_printf(
+      "%04x:%s:%.*s", card->pid, version, SERIAL_HASH_CHARS, hash
+    );
+
+    append_param_allowing(query, "dev", dev, ":");
+
+    g_free(dev);
+    g_free(hash);
+    g_free(version);
+  }
+}
+
+char *online_update_index_url(gboolean include_usage_info) {
+  GString *url = g_string_new(get_index_url());
+
+  g_string_append(url, "?prog=alsa-scarlett-gui");
+  append_param(url, "ver", VERSION);
+
+  if (include_usage_info) {
+    struct utsname un;
+
+    if (uname(&un) == 0)
+      append_param(url, "kernel", un.release);
+
+    append_os_param(url);
+    append_dev_params(url);
+  }
+
+  return g_string_free(url, FALSE);
+}
+
 void online_update_fetch_index(
+  gboolean               include_usage_info,
   online_update_index_cb callback,
   gpointer               user_data
 ) {
-  char *url = g_strdup_printf(
-    "%s?prog=alsa-scarlett-gui&ver=%s", get_index_url(), VERSION
-  );
+  char *url = online_update_index_url(include_usage_info);
   gboolean started = request_start(
     url, MAX_INDEX_SIZE, fetch_index_done, callback, user_data, NULL
   );

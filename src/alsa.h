@@ -440,6 +440,12 @@ char *alsa_get_item_name(struct alsa_elem *elem, int i);
 const void *alsa_get_elem_bytes(struct alsa_elem *elem, size_t *size);
 void alsa_set_elem_bytes(struct alsa_elem *elem, const void *data, size_t size);
 
+/* The firmware version the card is running: a bare number for
+ * scarlett2-era devices, dotted components for scarlett4. NULL if the
+ * card reports none. Free with g_free().
+ */
+char *card_firmware_version(struct alsa_card *card);
+
 // create simulated optional element
 struct alsa_elem *alsa_create_optional_elem(
   struct alsa_card *card,
@@ -458,6 +464,12 @@ struct alsa_elem *alsa_create_optional_enum_elem(
 
 // add to alsa_cards array
 struct alsa_card *card_create(int card_num);
+
+/* The array of known cards, as struct alsa_card * entries. Slots
+ * belonging to cards that have gone away are cleared in place rather
+ * than removed, so entries may be NULL and callers must skip them.
+ */
+GArray *alsa_get_cards(void);
 
 // parse elements (used by alsa-sim.c)
 void alsa_set_lr_nums(struct alsa_card *card);

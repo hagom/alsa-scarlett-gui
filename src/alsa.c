@@ -290,6 +290,38 @@ long *alsa_get_elem_int_values(struct alsa_elem *elem) {
   return values;
 }
 
+/* The firmware version the card is running, as a bare number for
+ * scarlett2-era devices and dotted components for scarlett4. Returns
+ * NULL if the card reports none. Free with g_free().
+ *
+ * Reads the "Firmware Version" control. card->firmware_version_4 holds
+ * this only for DRIVER_TYPE_SOCKET cards. The best version available as
+ * a local file comes from card_best_local_firmware().
+ */
+char *card_firmware_version(struct alsa_card *card) {
+  struct alsa_elem *elem = get_elem_by_name(card->elems, "Firmware Version");
+
+  if (!elem || elem->count < 1)
+    return NULL;
+
+  if (elem->count == 1)
+    return g_strdup_printf("%ld", alsa_get_elem_value(elem));
+
+  long *values = alsa_get_elem_int_values(elem);
+
+  if (!values)
+    return NULL;
+
+  GString *version = g_string_new(NULL);
+
+  for (int i = 0; i < elem->count; i++)
+    g_string_append_printf(version, i ? ".%ld" : "%ld", values[i]);
+
+  g_free(values);
+
+  return g_string_free(version, FALSE);
+}
+
 // set multiple int values for an element (e.g., biquad coefficients)
 void alsa_set_elem_int_values(
   struct alsa_elem *elem, const long *values, int count
@@ -1567,6 +1599,10 @@ static struct alsa_card *find_card_by_card_num(int card_num) {
   }
 
   return NULL;
+}
+
+GArray *alsa_get_cards(void) {
+  return alsa_cards;
 }
 
 // create a new entry in the alsa_cards array (either an unused entry

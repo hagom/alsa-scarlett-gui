@@ -4,7 +4,7 @@
 /* Stubs for what the code under test links against but does not
  * exercise.
  *
- * The ALSA functions are the ones online-update.c calls to build the
+ * The alsa.c functions are the ones online-update.c calls to build the
  * census parameters; linking alsa.c itself would pull in the whole
  * GUI, and the cached-index paths under test never reach the census
  * builder, so "no cards" is the answer these need to give.
@@ -47,14 +47,10 @@ const char *firmware_store_get_filename(
   return NULL;
 }
 
-struct alsa_elem *get_elem_by_name(GPtrArray *elems, const char *name) {
+long *alsa_get_elem_int_values(struct alsa_elem *elem) {
   return NULL;
 }
 
-long alsa_get_elem_value(struct alsa_elem *elem) {
-  return 0;
-}
-
-long *alsa_get_elem_int_values(struct alsa_elem *elem) {
+char *card_firmware_version(struct alsa_card *card) {
   return NULL;
 }
