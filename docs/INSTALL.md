@@ -141,25 +141,35 @@ https://github.com/geoffreybennett/scarlett4-firmware and place it in
 On Fedora, these packages need to be installed:
 
 ```
-sudo dnf -y install make gcc alsa-lib-devel gtk4-devel openssl-devel
+sudo dnf -y install make gcc alsa-lib-devel gtk4-devel openssl-devel \
+  libsoup3-devel json-glib-devel
 ```
 
 On OpenSUSE:
 
 ```
-sudo zypper in git alsa-devel gtk4-devel libopenssl-devel
+sudo zypper in git alsa-devel gtk4-devel libopenssl-devel \
+  libsoup-3_0-devel json-glib-devel
 ```
 
 On Ubuntu:
 
 ```
-sudo apt -y install git make gcc libgtk-4-dev libasound2-dev libssl-dev
+sudo apt -y install git make gcc libgtk-4-dev libasound2-dev libssl-dev \
+  libsoup-3.0-dev libjson-glib-dev
 ```
 
 On Arch:
 
 ```
-sudo pacman -S gtk4
+sudo pacman -S gtk4 libsoup3 json-glib
+```
+
+libsoup3 and json-glib are needed for the online firmware update
+check. To build without them:
+
+```
+make ONLINE_UPDATE=0
 ```
 
 To download from github:

@@ -1,0 +1,870 @@
+// SPDX-FileCopyrightText: 2026 Geoffrey D. Bennett <g@b4.vu>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#ifdef HAVE_ONLINE_UPDATE
+
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/utsname.h>
+
+#include <glib/gstdio.h>
+#include <json-glib/json-glib.h>
+#include <libsoup/soup.h>
+
+#include "online-update.h"
+
+#define INDEX_URL "https://fr.b4.vu/scarlett/v1/index.json"
+#define TIMEOUT_SECONDS 10
+
+// How stale the cached index must be before checking again
+#define CHECK_INTERVAL_SECONDS (24 * 60 * 60)
+
+// Response bodies are read into memory, so refuse anything larger
+// than the biggest plausible firmware file
+#define MAX_INDEX_SIZE     (1 * 1024 * 1024)
+#define MAX_FIRMWARE_SIZE (32 * 1024 * 1024)
+
+static SoupSession *get_session(void) {
+  static SoupSession *session = NULL;
+
+  if (!session)
+    session = soup_session_new_with_options(
+      "user-agent", "alsa-scarlett-gui/" VERSION " ",
+      "timeout",    TIMEOUT_SECONDS,
+      NULL
+    );
+
+  return session;
+}
+
+static const char *get_index_url(void) {
+  const char *url = g_getenv("SCARLETT_UPDATE_INDEX_URL");
+
+  return url ? url : INDEX_URL;
+}
+
+static void free_online_firmware(gpointer data) {
+  struct online_firmware *firmware = data;
+
+  g_free(firmware->version);
+  g_free(firmware->url);
+  g_free(firmware->basename);
+  g_free(firmware->sha256);
+  g_strfreev(firmware->min_kernel);
+  g_free(firmware->min_fcp_server);
+  g_free(firmware);
+}
+
+static void free_online_client(gpointer data) {
+  struct online_client *client = data;
+
+  g_free(client->name);
+  g_free(client->version);
+  g_free(client->url);
+  g_free(client);
+}
+
+void online_update_index_free(struct online_update_index *index) {
+  if (!index)
+    return;
+
+  g_hash_table_destroy(index->firmware);
+  g_list_free_full(index->clients, free_online_client);
+  g_free(index);
+}
+
+/* Parse the leading dotted decimal components, stopping at the first
+ * character that cannot continue a component. end_out, if given,
+ * receives the first unconsumed character, so callers that require
+ * the whole string to be a version can check for the terminator.
+ */
+static int parse_version_parts(
+  const char  *version,
+  uint32_t    *parts,
+  int          count,
+  const char **end_out
+) {
+  int i = 0;
+
+  memset(parts, 0, count * sizeof(*parts));
+
+  while (i < count) {
+    // strtoul() accepts leading whitespace and a sign, neither of
+    // which belongs in a version component
+    if (!g_ascii_isdigit(*version))
+      break;
+
+    char *end;
+    guint64 value = g_ascii_strtoull(version, &end, 10);
+
+    parts[i++] = value > UINT32_MAX ? UINT32_MAX : value;
+
+    version = end;
+
+    if (*version != '.')
+      break;
+
+    // A trailing dot is not the start of another component
+    if (!g_ascii_isdigit(version[1]))
+      break;
+
+    version++;
+  }
+
+  if (end_out)
+    *end_out = version;
+
+  return i;
+}
+
+int online_parse_version(const char *version, uint32_t *parts) {
+  if (!version) {
+    memset(parts, 0, FIRMWARE_VERSION_PARTS * sizeof(*parts));
+    return 0;
+  }
+
+  return parse_version_parts(
+    version, parts, FIRMWARE_VERSION_PARTS, NULL
+  );
+}
+
+/* Parse a version that must be nothing but dotted decimals, such as
+ * "2417" or "3.0.2778.0". Returns 0 if it has trailing junk, more
+ * components than fit, or no components at all.
+ */
+static int parse_strict_version(const char *version, uint32_t *parts) {
+  const char *end;
+  int count = parse_version_parts(
+    version, parts, FIRMWARE_VERSION_PARTS, &end
+  );
+
+  if (!count || *end)
+    return 0;
+
+  return count;
+}
+
+/* Check the running kernel against the firmware's min_kernel list:
+ * a branch (major.minor) listed there requires at least that entry,
+ * and unlisted branches require at least the last (highest) entry.
+ */
+static char *check_min_kernel(char **min_kernel) {
+  struct utsname uts;
+  uint32_t kernel[FIRMWARE_VERSION_PARTS];
+
+  if (uname(&uts) < 0 ||
+      online_parse_version(uts.release, kernel) < 2)
+    return g_strdup("Cannot determine the running kernel version");
+
+  const char *last = NULL;
+  for (char **entry = min_kernel; *entry; entry++) {
+    uint32_t min[FIRMWARE_VERSION_PARTS];
+    if (online_parse_version(*entry, min) < 2)
+      continue;
+
+    last = *entry;
+
+    // Same branch?
+    if (kernel[0] == min[0] && kernel[1] == min[1]) {
+      if (firmware_version_cmp(kernel, min) >= 0)
+        return NULL;
+      return g_strdup_printf(
+        "This firmware requires kernel %s or later", *entry
+      );
+    }
+  }
+
+  if (!last)
+    return NULL;
+
+  uint32_t min[FIRMWARE_VERSION_PARTS];
+  online_parse_version(last, min);
+
+  if (firmware_version_cmp(kernel, min) >= 0)
+    return NULL;
+
+  return g_strdup_printf(
+    "This firmware requires kernel %s or later", last
+  );
+}
+
+char *online_firmware_requirement_error(
+  const struct online_firmware *firmware,
+  const char                   *fcp_server_version
+) {
+  if (firmware->min_kernel && *firmware->min_kernel) {
+    char *error = check_min_kernel(firmware->min_kernel);
+    if (error)
+      return error;
+  }
+
+  if (firmware->min_fcp_server) {
+    uint32_t min[FIRMWARE_VERSION_PARTS];
+    uint32_t current[FIRMWARE_VERSION_PARTS];
+
+    /* An unparseable requirement cannot be checked against anything,
+     * so treat it as no requirement rather than blocking every
+     * device on a malformed index entry
+     */
+    if (!online_parse_version(firmware->min_fcp_server, min))
+      return NULL;
+
+    if (!online_parse_version(fcp_server_version, current) ||
+        firmware_version_cmp(current, min) < 0)
+      return g_strdup_printf(
+        "This firmware requires fcp-server %s or later",
+        firmware->min_fcp_server
+      );
+  }
+
+  return NULL;
+}
+
+/* Typed member accessors: json-glib's own get_*_member() log a
+ * critical and return a default when the member is absent or holds
+ * another type, which untrusted input must not be able to provoke.
+ */
+static JsonNode *get_member(
+  JsonObject *obj,
+  const char *name,
+  GType       value_type
+) {
+  JsonNode *node = json_object_get_member(obj, name);
+
+  if (!node ||
+      !JSON_NODE_HOLDS_VALUE(node) ||
+      json_node_get_value_type(node) != value_type)
+    return NULL;
+
+  return node;
+}
+
+static const char *get_string_member(JsonObject *obj, const char *name) {
+  JsonNode *node = get_member(obj, name, G_TYPE_STRING);
+
+  return node ? json_node_get_string(node) : NULL;
+}
+
+// Returns fallback if the member is missing or not an integer
+static gint64 get_int_member(
+  JsonObject *obj,
+  const char *name,
+  gint64      fallback
+) {
+  JsonNode *node = get_member(obj, name, G_TYPE_INT64);
+
+  return node ? json_node_get_int(node) : fallback;
+}
+
+static JsonObject *get_object_member(JsonObject *obj, const char *name) {
+  JsonNode *node = json_object_get_member(obj, name);
+
+  if (!node || !JSON_NODE_HOLDS_OBJECT(node))
+    return NULL;
+
+  return json_node_get_object(node);
+}
+
+static JsonArray *get_array_member(JsonObject *obj, const char *name) {
+  JsonNode *node = json_object_get_member(obj, name);
+
+  if (!node || !JSON_NODE_HOLDS_ARRAY(node))
+    return NULL;
+
+  return json_node_get_array(node);
+}
+
+// Collect the string elements of an array, skipping any that aren't
+// strings, so a bad element cannot truncate the list
+static char **parse_min_kernel(JsonObject *obj) {
+  JsonArray *array = get_array_member(obj, "min_kernel");
+
+  if (!array)
+    return NULL;
+
+  guint length = json_array_get_length(array);
+  char **min_kernel = g_new0(char *, length + 1);
+  guint n = 0;
+
+  for (guint i = 0; i < length; i++) {
+    JsonNode *node = json_array_get_element(array, i);
+
+    if (!JSON_NODE_HOLDS_VALUE(node) ||
+        json_node_get_value_type(node) != G_TYPE_STRING)
+      continue;
+
+    min_kernel[n++] = g_strdup(json_node_get_string(node));
+  }
+
+  if (!n) {
+    g_strfreev(min_kernel);
+    return NULL;
+  }
+
+  return min_kernel;
+}
+
+// Reject anything that is not plain lowercase hex of the right length
+static gboolean is_valid_sha256(const char *sha256) {
+  if (strlen(sha256) != 64)
+    return FALSE;
+
+  for (const char *p = sha256; *p; p++)
+    if (!g_ascii_isdigit(*p) && !(*p >= 'a' && *p <= 'f'))
+      return FALSE;
+
+  return TRUE;
+}
+
+/* The filename is taken from the URL in a downloaded index, so it
+ * must not be able to escape the download directory. Use the last
+ * segment of the parsed (and therefore normalised and percent-decoded)
+ * path, and reject anything that is not a plain filename.
+ */
+static char *get_download_basename(const char *url) {
+  GUri *uri = g_uri_parse(url, G_URI_FLAGS_NONE, NULL);
+
+  if (!uri)
+    return NULL;
+
+  const char *path = g_uri_get_path(uri);
+  const char *slash = strrchr(path, '/');
+  char *basename = g_strdup(slash ? slash + 1 : path);
+
+  g_uri_unref(uri);
+
+  if (!*basename ||
+      !strcmp(basename, ".") ||
+      !strcmp(basename, "..") ||
+      strchr(basename, '/') ||
+      g_path_is_absolute(basename)) {
+    g_free(basename);
+    return NULL;
+  }
+
+  return basename;
+}
+
+static struct online_firmware *parse_firmware_entry(
+  const char *key,
+  JsonObject *obj
+) {
+  unsigned int vid, pid;
+  char extra;
+  if (sscanf(key, "%4x:%4x%c", &vid, &pid, &extra) != 2 ||
+      vid > UINT16_MAX || pid > UINT16_MAX) {
+    fprintf(stderr, "Update index: invalid device key %s\n", key);
+    return NULL;
+  }
+
+  const char *version = get_string_member(obj, "version");
+  const char *url = get_string_member(obj, "url");
+  const char *sha256 = get_string_member(obj, "sha256");
+  gint64 size = get_int_member(obj, "size", 0);
+
+  if (!version || !url || !sha256 ||
+      size <= 0 || size > MAX_FIRMWARE_SIZE) {
+    fprintf(stderr, "Update index: incomplete entry for %s\n", key);
+    return NULL;
+  }
+
+  if (!is_valid_sha256(sha256)) {
+    fprintf(stderr, "Update index: invalid sha256 for %s\n", key);
+    return NULL;
+  }
+
+  uint32_t parts[FIRMWARE_VERSION_PARTS];
+  if (!parse_strict_version(version, parts)) {
+    fprintf(
+      stderr, "Update index: invalid version %s for %s\n", version, key
+    );
+    return NULL;
+  }
+
+  /* Must be the last check: this allocates, and ownership only passes
+   * to the entry below, so an earlier return added after it would leak
+   */
+  char *basename = get_download_basename(url);
+  if (!basename) {
+    fprintf(stderr, "Update index: unusable url %s for %s\n", url, key);
+    return NULL;
+  }
+
+  struct online_firmware *firmware = g_new0(struct online_firmware, 1);
+
+  firmware->usb_vid = vid;
+  firmware->usb_pid = pid;
+  firmware->version = g_strdup(version);
+  memcpy(firmware->version_parts, parts, sizeof(parts));
+  firmware->url = g_strdup(url);
+  firmware->basename = basename;
+  firmware->sha256 = g_strdup(sha256);
+  firmware->size = size;
+  firmware->min_kernel = parse_min_kernel(obj);
+  firmware->min_fcp_server = g_strdup(
+    get_string_member(obj, "min_fcp_server")
+  );
+
+  return firmware;
+}
+
+static void parse_firmware(
+  struct online_update_index *index,
+  JsonObject                 *root_obj
+) {
+  JsonObject *firmware_obj = get_object_member(root_obj, "firmware");
+
+  if (!firmware_obj)
+    return;
+
+  JsonObjectIter iter;
+  const char *key;
+  JsonNode *node;
+
+  json_object_iter_init(&iter, firmware_obj);
+  while (json_object_iter_next(&iter, &key, &node)) {
+    if (!JSON_NODE_HOLDS_OBJECT(node))
+      continue;
+
+    struct online_firmware *firmware =
+      parse_firmware_entry(key, json_node_get_object(node));
+    if (!firmware)
+      continue;
+
+    // A duplicate product ID replaces the earlier entry
+    g_hash_table_insert(
+      index->firmware, GINT_TO_POINTER(firmware->usb_pid), firmware
+    );
+  }
+}
+
+static void parse_clients(
+  struct online_update_index *index,
+  JsonObject                 *root_obj
+) {
+  JsonObject *clients_obj = get_object_member(root_obj, "clients");
+
+  if (!clients_obj)
+    return;
+
+  JsonObjectIter iter;
+  const char *key;
+  JsonNode *node;
+
+  json_object_iter_init(&iter, clients_obj);
+  while (json_object_iter_next(&iter, &key, &node)) {
+    if (!JSON_NODE_HOLDS_OBJECT(node))
+      continue;
+
+    JsonObject *obj = json_node_get_object(node);
+    const char *version = get_string_member(obj, "version");
+
+    if (!version) {
+      fprintf(stderr, "Update index: no version for client %s\n", key);
+      continue;
+    }
+
+    struct online_client *client = g_new0(struct online_client, 1);
+
+    client->name = g_strdup(key);
+    client->version = g_strdup(version);
+    client->url = g_strdup(get_string_member(obj, "url"));
+    index->clients = g_list_append(index->clients, client);
+  }
+}
+
+static struct online_update_index *parse_index(
+  GBytes      *bytes,
+  const char **error
+) {
+  JsonParser *parser = json_parser_new();
+  struct online_update_index *index = NULL;
+
+  gsize length;
+  const char *data = g_bytes_get_data(bytes, &length);
+
+  if (!data || !json_parser_load_from_data(parser, data, length, NULL)) {
+    *error = "Cannot parse update index";
+    goto done;
+  }
+
+  JsonNode *root = json_parser_get_root(parser);
+  if (!root || !JSON_NODE_HOLDS_OBJECT(root)) {
+    *error = "Update index is not a JSON object";
+    goto done;
+  }
+  JsonObject *root_obj = json_node_get_object(root);
+
+  if (get_int_member(root_obj, "schema", 0) != 1) {
+    *error = "Unsupported update index schema";
+    goto done;
+  }
+
+  index = g_new0(struct online_update_index, 1);
+  index->firmware = g_hash_table_new_full(
+    g_direct_hash, g_direct_equal, NULL, free_online_firmware
+  );
+
+  parse_firmware(index, root_obj);
+  parse_clients(index, root_obj);
+
+done:
+  g_object_unref(parser);
+  return index;
+}
+
+/* The fetched index is cached so that a launch which the once-a-day
+ * gate stops from fetching still knows what the last check found, and
+ * so the file's mtime can serve as the record of when that was. A
+ * separate timestamp file could say "checked" with no index beside it.
+ */
+static char *cached_index_fn(void) {
+  return g_build_filename(
+    g_get_user_cache_dir(), "alsa-scarlett-gui", "index.json", NULL
+  );
+}
+
+/* Written only after the response parses, so a server returning
+ * something unusable leaves the previous index in place instead of
+ * replacing it with something that yields no update notice.
+ */
+static void save_cached_index(GBytes *bytes) {
+  char *fn = cached_index_fn();
+  char *dir = g_path_get_dirname(fn);
+  GError *gerror = NULL;
+
+  if (g_mkdir_with_parents(dir, 0755) != 0) {
+    fprintf(stderr, "Cannot create %s: %s\n", dir, strerror(errno));
+    goto done;
+  }
+
+  gsize length;
+  const char *data = g_bytes_get_data(bytes, &length);
+
+  if (!g_file_set_contents(fn, data, length, &gerror)) {
+    fprintf(stderr, "Cannot write %s: %s\n", fn, gerror->message);
+    g_clear_error(&gerror);
+  }
+
+done:
+  g_free(dir);
+  g_free(fn);
+}
+
+struct online_update_index *online_update_load_cached_index(void) {
+  char *fn = cached_index_fn();
+  char *data = NULL;
+  gsize length;
+
+  if (!g_file_get_contents(fn, &data, &length, NULL)) {
+    g_free(fn);
+    return NULL;
+  }
+
+  GBytes *bytes = g_bytes_new_take(data, length);
+  const char *error = NULL;
+  struct online_update_index *index = parse_index(bytes, &error);
+
+  g_bytes_unref(bytes);
+
+  if (index && error) {
+    online_update_index_free(index);
+    index = NULL;
+  }
+
+  if (!index)
+    fprintf(
+      stderr, "Ignoring cached update index %s: %s\n",
+      fn, error ? error : "cannot parse"
+    );
+
+  g_free(fn);
+
+  return index;
+}
+
+gboolean online_update_check_is_due(void) {
+  char *fn = cached_index_fn();
+  GStatBuf st;
+  gboolean due = TRUE;
+
+  if (g_stat(fn, &st) == 0) {
+    gint64 age = g_get_real_time() / G_USEC_PER_SEC - st.st_mtime;
+
+    /* A negative age means the mtime is in the future, which a clock
+     * change or a copied cache can produce; treat it as due rather
+     * than as a check that never expires.
+     */
+    due = age < 0 || age >= CHECK_INTERVAL_SECONDS;
+  }
+
+  g_free(fn);
+
+  return due;
+}
+
+struct request;
+
+/* Called with the response body, or with NULL and an error message
+ * derived from the transfer, the HTTP status, or the size limit
+ */
+typedef void (*request_done_cb)(
+  struct request *req,
+  GBytes         *bytes,
+  const char     *error
+);
+
+/* A GET request whose body is read into memory. done() is called
+ * exactly once; either way the request is freed afterwards.
+ */
+struct request {
+  SoupMessage     *msg;
+  GCancellable    *cancellable;
+  gsize            max_size;
+  gboolean         too_large;
+  request_done_cb  done;
+  gpointer         callback;
+  gpointer         user_data;
+};
+
+static void request_finished(
+  GObject      *source,
+  GAsyncResult *result,
+  gpointer      user_data
+) {
+  struct request *req = user_data;
+  GError *gerror = NULL;
+
+  GBytes *bytes = soup_session_send_and_read_finish(
+    SOUP_SESSION(source), result, &gerror
+  );
+
+  if (!bytes) {
+    const char *error = "Request failed";
+
+    if (req->too_large)
+      error = "Response is too large";
+    else if (gerror)
+      error = gerror->message;
+
+    req->done(req, NULL, error);
+    g_clear_error(&gerror);
+  } else {
+    SoupStatus status = soup_message_get_status(req->msg);
+
+    if (status != SOUP_STATUS_OK) {
+      char *error = g_strdup_printf(
+        "Server returned %u %s", status, soup_status_get_phrase(status)
+      );
+      req->done(req, NULL, error);
+      g_free(error);
+    } else if (g_bytes_get_size(bytes) > req->max_size) {
+      req->done(req, NULL, "Response is too large");
+    } else {
+      req->done(req, bytes, NULL);
+    }
+
+    g_bytes_unref(bytes);
+  }
+
+  g_object_unref(req->cancellable);
+  g_object_unref(req->msg);
+  g_free(req);
+}
+
+/* Refuse an oversized body before reading it into memory. The length
+ * check in request_finished() catches a server that lies about or
+ * omits Content-Length.
+ */
+static void request_got_headers(SoupMessage *msg, gpointer user_data) {
+  struct request *req = user_data;
+  goffset length = soup_message_headers_get_content_length(
+    soup_message_get_response_headers(msg)
+  );
+
+  if (length > 0 && (gsize)length > req->max_size) {
+    req->too_large = TRUE;
+    g_cancellable_cancel(req->cancellable);
+  }
+}
+
+// Returns FALSE without calling done() if the URL is unusable
+static gboolean request_start(
+  const char      *url,
+  gsize            max_size,
+  request_done_cb  done,
+  gpointer         callback,
+  gpointer         user_data
+) {
+  SoupMessage *msg = soup_message_new(SOUP_METHOD_GET, url);
+
+  if (!msg)
+    return FALSE;
+
+  struct request *req = g_new0(struct request, 1);
+
+  req->msg = msg;
+  req->cancellable = g_cancellable_new();
+  req->max_size = max_size;
+  req->done = done;
+  req->callback = callback;
+  req->user_data = user_data;
+
+  g_signal_connect(
+    msg, "got-headers", G_CALLBACK(request_got_headers), req
+  );
+
+  soup_session_send_and_read_async(
+    get_session(), msg, G_PRIORITY_DEFAULT, req->cancellable,
+    request_finished, req
+  );
+
+  return TRUE;
+}
+
+static void fetch_index_done(
+  struct request *req,
+  GBytes         *bytes,
+  const char     *error
+) {
+  online_update_index_cb callback = req->callback;
+
+  if (!bytes) {
+    callback(NULL, error, req->user_data);
+    return;
+  }
+
+  struct online_update_index *index = parse_index(bytes, &error);
+
+  if (!index || error) {
+    online_update_index_free(index);
+    callback(NULL, error, req->user_data);
+  } else {
+    save_cached_index(bytes);
+    callback(index, NULL, req->user_data);
+  }
+}
+
+void online_update_fetch_index(
+  online_update_index_cb callback,
+  gpointer               user_data
+) {
+  char *url = g_strdup_printf(
+    "%s?prog=alsa-scarlett-gui&ver=%s", get_index_url(), VERSION
+  );
+  gboolean started = request_start(
+    url, MAX_INDEX_SIZE, fetch_index_done, callback, user_data
+  );
+  g_free(url);
+
+  if (!started)
+    callback(NULL, "Invalid update index URL", user_data);
+}
+
+struct download {
+  char     *sha256;
+  gsize     size;
+  char     *fn;
+  gpointer  user_data;  // the caller's, not the request's
+};
+
+/* Write the verified data to a temporary file in the same directory
+ * and rename it into place, so a partial or interrupted write can
+ * never be mistaken for a complete download
+ */
+static const char *save_download(
+  struct download *dl,
+  gconstpointer    data,
+  gsize            length
+) {
+  char *dir = g_path_get_dirname(dl->fn);
+  int ok = g_mkdir_with_parents(dir, 0755) == 0;
+  g_free(dir);
+
+  if (!ok)
+    return "Cannot create the firmware download directory";
+
+  char *tmp_fn = g_strdup_printf("%s.partial", dl->fn);
+  GError *gerror = NULL;
+  const char *error = NULL;
+
+  if (!g_file_set_contents(tmp_fn, data, length, &gerror)) {
+    error = "Cannot write the downloaded firmware";
+    fprintf(stderr, "Cannot write %s: %s\n", tmp_fn, gerror->message);
+    g_clear_error(&gerror);
+  } else if (rename(tmp_fn, dl->fn) != 0) {
+    error = "Cannot save the downloaded firmware";
+    fprintf(
+      stderr, "Cannot rename %s: %s\n", tmp_fn, strerror(errno)
+    );
+    g_unlink(tmp_fn);
+  }
+
+  g_free(tmp_fn);
+
+  return error;
+}
+
+static void download_done(
+  struct request *req,
+  GBytes         *bytes,
+  const char     *error
+) {
+  online_update_download_cb callback = req->callback;
+  struct download *dl = req->user_data;
+
+  if (bytes) {
+    gsize length;
+    gconstpointer data = g_bytes_get_data(bytes, &length);
+
+    if (length != dl->size) {
+      error = "Downloaded firmware has the wrong size";
+    } else {
+      char *sha256 = g_compute_checksum_for_data(
+        G_CHECKSUM_SHA256, data, length
+      );
+      gboolean sha256_ok = !strcmp(sha256, dl->sha256);
+      g_free(sha256);
+
+      error = sha256_ok
+        ? save_download(dl, data, length)
+        : "Downloaded firmware failed its checksum";
+    }
+  }
+
+  callback(error ? NULL : dl->fn, error, dl->user_data);
+
+  g_free(dl->sha256);
+  g_free(dl->fn);
+  g_free(dl);
+}
+
+void online_update_download(
+  const struct online_firmware *firmware,
+  online_update_download_cb     callback,
+  gpointer                      user_data
+) {
+  struct download *dl = g_new0(struct download, 1);
+
+  dl->sha256 = g_strdup(firmware->sha256);
+  dl->size = firmware->size;
+  dl->user_data = user_data;
+
+  // parse_firmware_entry() rejects entries without a usable basename
+  dl->fn = g_build_filename(
+    g_get_user_cache_dir(), "alsa-scarlett-gui", "firmware",
+    firmware->basename, NULL
+  );
+
+  if (!request_start(
+        firmware->url, firmware->size, download_done, callback, dl
+      )) {
+    g_free(dl->sha256);
+    g_free(dl->fn);
+    g_free(dl);
+    callback(NULL, "Invalid firmware download URL", user_data);
+  }
+}
+
+#endif // HAVE_ONLINE_UPDATE

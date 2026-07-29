@@ -45,7 +45,12 @@ else
   BUILD_MODE := normal
 endif
 
-# Rebuild everything when switching between normal and ASan builds
+# Online update checks need libsoup3 and json-glib; build with
+# ONLINE_UPDATE=0 to disable the feature and the dependencies
+ONLINE_UPDATE ?= 1
+BUILD_MODE := $(BUILD_MODE)-online$(ONLINE_UPDATE)
+
+# Rebuild everything when the flags that affect every object change
 BUILD_MODE_FILE := .build-mode
 ifneq ($(BUILD_MODE),$(shell cat $(BUILD_MODE_FILE) 2>/dev/null))
   $(shell echo $(BUILD_MODE) > $(BUILD_MODE_FILE))
@@ -64,6 +69,12 @@ LDFLAGS += $(shell $(PKG_CONFIG) --libs glib-2.0)
 LDFLAGS += $(shell $(PKG_CONFIG) --libs gtk4)
 LDFLAGS += $(shell $(PKG_CONFIG) --libs alsa)
 LDFLAGS += -lm -lcrypto -pie
+
+ifeq ($(ONLINE_UPDATE),1)
+  CFLAGS += -DHAVE_ONLINE_UPDATE
+  CFLAGS += $(shell $(PKG_CONFIG) --cflags libsoup-3.0 json-glib-1.0)
+  LDFLAGS += $(shell $(PKG_CONFIG) --libs libsoup-3.0 json-glib-1.0)
+endif
 
 COMPILE.c = $(CC) $(DEPFLAGS) $(CFLAGS) -c
 
@@ -150,6 +161,7 @@ help:
 	@echo "This Makefile knows about:"
 	@echo "  make"
 	@echo "  make ASAN=1  (AddressSanitizer build)"
+	@echo "  make ONLINE_UPDATE=0  (omit online update checks)"
 	@echo "  make install"
 	@echo "  make uninstall"
 	@echo "  make test"
