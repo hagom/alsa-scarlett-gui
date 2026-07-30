@@ -365,6 +365,11 @@ void add_monitor_groups_tab(GtkWidget *notebook, struct alsa_card *card) {
   if (!get_elem_by_prefix(card->elems, "Main Group Output"))
     return;
 
+  // The group grid is built by walking the sinks, which a device
+  // without a routing matrix does not have
+  if (!card->routing_snks)
+    return;
+
   GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
   gtk_widget_set_margin_start(content, 20);
   gtk_widget_set_margin_end(content, 20);
