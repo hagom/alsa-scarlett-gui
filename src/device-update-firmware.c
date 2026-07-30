@@ -165,16 +165,6 @@ static gpointer update_firmware_hwdep(struct modal_data *modal_data) {
   return NULL;
 }
 
-// Compare two 4-valued firmware versions
-// Returns: -1 if v1 < v2, 0 if v1 == v2, 1 if v1 > v2
-static int version_cmp(const uint32_t *v1, const uint32_t *v2) {
-  for (int i = 0; i < 4; i++) {
-    if (v1[i] < v2[i]) return -1;
-    if (v1[i] > v2[i]) return 1;
-  }
-  return 0;
-}
-
 // FCP socket (Scarlett4) firmware update implementation
 static gpointer update_firmware_socket(struct modal_data *modal_data) {
   struct alsa_card *card = modal_data->card;
@@ -216,14 +206,18 @@ static gpointer update_firmware_socket(struct modal_data *modal_data) {
   // Check if ESP needs update
   int need_esp = 0;
   if (esp_fw) {
-    if (version_cmp(card->esp_firmware_version, esp_fw->firmware_version) != 0)
+    if (firmware_version_cmp(
+          card->esp_firmware_version, esp_fw->firmware_version
+        ) != 0)
       need_esp = 1;
   }
 
   // Check if Leapfrog is already loaded (device firmware == leapfrog version)
   int leapfrog_loaded = 0;
   if (leapfrog_fw) {
-    if (version_cmp(card->firmware_version_4, leapfrog_fw->firmware_version) == 0)
+    if (firmware_version_cmp(
+          card->firmware_version_4, leapfrog_fw->firmware_version
+        ) == 0)
       leapfrog_loaded = 1;
   }
 

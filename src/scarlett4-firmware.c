@@ -21,6 +21,17 @@ const char *scarlett4_firmware_type_magic[] = {
   [SCARLETT4_FIRMWARE_LEAPFROG]  = "SCARLEAP"
 };
 
+int firmware_version_cmp(const uint32_t *v1, const uint32_t *v2) {
+  for (int i = 0; i < FIRMWARE_VERSION_PARTS; i++) {
+    if (v1[i] < v2[i])
+      return -1;
+    if (v1[i] > v2[i])
+      return 1;
+  }
+
+  return 0;
+}
+
 // Hash table to store the best firmware for each PID
 struct found_firmware {
   char                         *fn;
@@ -101,7 +112,7 @@ static struct scarlett4_firmware *firmware_header_disk_to_mem(
   firmware->type = type;
   firmware->usb_vid = ntohs(disk->usb_vid);
   firmware->usb_pid = ntohs(disk->usb_pid);
-  for (int i = 0; i < 4; i++)
+  for (int i = 0; i < FIRMWARE_VERSION_PARTS; i++)
     firmware->firmware_version[i] = ntohl(disk->firmware_version[i]);
   firmware->firmware_length = ntohl(disk->firmware_length);
   memcpy(firmware->sha256, disk->sha256, 32);
@@ -122,7 +133,7 @@ static struct scarlett4_firmware_container *firmware_container_header_disk_to_me
 
   container->usb_vid = ntohs(disk->usb_vid);
   container->usb_pid = ntohs(disk->usb_pid);
-  for (int i = 0; i < 4; i++)
+  for (int i = 0; i < FIRMWARE_VERSION_PARTS; i++)
     container->firmware_version[i] = ntohl(disk->firmware_version[i]);
   container->num_sections = ntohl(disk->num_sections);
 
@@ -451,18 +462,6 @@ const char *scarlett4_firmware_type_to_string(enum scarlett4_firmware_type type)
   }
 }
 
-// Compare two 4-valued firmware versions
-// Returns: -1 if v1 < v2, 0 if equal, 1 if v1 > v2
-static int firmware_version_cmp(const uint32_t *v1, const uint32_t *v2) {
-  for (int i = 0; i < 4; i++) {
-    if (v1[i] < v2[i])
-      return -1;
-    if (v1[i] > v2[i])
-      return 1;
-  }
-  return 0;
-}
-
 static void free_found_firmware(gpointer data) {
   struct found_firmware *found = data;
   free(found->fn);
@@ -602,16 +601,6 @@ struct scarlett4_firmware_container *scarlett4_get_best_firmware(uint32_t pid) {
   return scarlett4_read_firmware_file(found->fn);
 }
 
-// Compare two 4-valued firmware versions
-// Returns: -1 if v1 < v2, 0 if v1 == v2, 1 if v1 > v2
-static int version_cmp(const uint32_t *v1, const uint32_t *v2) {
-  for (int i = 0; i < 4; i++) {
-    if (v1[i] < v2[i]) return -1;
-    if (v1[i] > v2[i]) return 1;
-  }
-  return 0;
-}
-
 // Find a firmware section by type in a container
 static struct scarlett4_firmware *find_section(
   struct scarlett4_firmware_container *container,
@@ -648,12 +637,14 @@ int scarlett4_is_mid_upgrade(struct alsa_card *card) {
   }
 
   // Check if leapfrog is loaded (device firmware == leapfrog version)
-  int leapfrog_loaded =
-    version_cmp(card->firmware_version_4, leapfrog_fw->firmware_version) == 0;
+  int leapfrog_loaded = firmware_version_cmp(
+    card->firmware_version_4, leapfrog_fw->firmware_version
+  ) == 0;
 
   // Check if ESP needs update
-  int need_esp =
-    version_cmp(card->esp_firmware_version, esp_fw->firmware_version) != 0;
+  int need_esp = firmware_version_cmp(
+    card->esp_firmware_version, esp_fw->firmware_version
+  ) != 0;
 
   fprintf(stderr, "is_mid_upgrade: leapfrog_loaded=%d need_esp=%d\n",
     leapfrog_loaded, need_esp);
