@@ -306,6 +306,11 @@ struct scarlett4_firmware_container *scarlett4_read_firmware_header(const char *
 
   int type = read_magic(file, fn);
 
+  if (type < 0) {
+    fclose(file);
+    return NULL;
+  }
+
   struct scarlett4_firmware_container *container = NULL;
 
   if (type == SCARLETT4_FIRMWARE_CONTAINER) {
@@ -335,6 +340,14 @@ struct scarlett4_firmware_container *scarlett4_read_firmware_header(const char *
          sizeof(container->firmware_version));
   container->num_sections = 1;
   container->sections = calloc(1, sizeof(struct scarlett4_firmware *));
+  if (!container->sections) {
+    perror("Failed to allocate memory for firmware sections");
+    free(container);
+    free(firmware);
+    fclose(file);
+    return NULL;
+  }
+
   container->sections[0] = firmware;
 
   fclose(file);
@@ -395,6 +408,14 @@ struct scarlett4_firmware_container *scarlett4_read_firmware_file(const char *fn
          sizeof(container->firmware_version));
   container->num_sections = 1;
   container->sections = calloc(1, sizeof(struct scarlett4_firmware *));
+  if (!container->sections) {
+    perror("Failed to allocate memory for firmware sections");
+    free(container);
+    free(firmware->firmware_data);
+    free(firmware);
+    return NULL;
+  }
+
   container->sections[0] = firmware;
 
   return container;
