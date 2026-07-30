@@ -2079,31 +2079,35 @@ void add_io_tab(GtkWidget *top_notebook, struct alsa_card *card) {
   add_category_tab(notebook, card, PC_DSP, "DSP", 1, 1);
   add_mixer_tab(notebook, card);
 
-  // I/O tab (only if there are any sub-tabs)
-  if (gtk_notebook_get_n_pages(GTK_NOTEBOOK(notebook)) > 0) {
-    GtkWidget *io_tab_content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_widget_set_margin_top(io_tab_content, 20);
-
-    gtk_box_append(GTK_BOX(io_tab_content), config_help_label(
-      "Use the checkboxes to hide unused inputs and outputs from the display.\n"
-      "You can also give each port a custom name to help identify it.\n"
-      "Use the link buttons to pair adjacent channels as stereo."
-    ));
-
-    gtk_widget_set_vexpand(notebook, TRUE);
-    gtk_box_append(GTK_BOX(io_tab_content), notebook);
-
-    // Restore saved I/O tab and connect signal to save tab changes
-    setup_notebook_tab_persistence(
-      GTK_NOTEBOOK(notebook), card, CONFIG_IO_TAB_KEY
-    );
-
-    GtkWidget *io_tab_label = gtk_label_new("I/O Configuration");
-    g_object_set_data(
-      G_OBJECT(io_tab_content), PAGE_ID_KEY, (gpointer)"io-config"
-    );
-    gtk_notebook_append_page(
-      GTK_NOTEBOOK(top_notebook), io_tab_content, io_tab_label
-    );
+  // Nothing to show, so no tab rather than an empty one
+  if (!gtk_notebook_get_n_pages(GTK_NOTEBOOK(notebook))) {
+    g_object_ref_sink(notebook);
+    g_object_unref(notebook);
+    return;
   }
+
+  GtkWidget *io_tab_content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+  gtk_widget_set_margin_top(io_tab_content, 20);
+
+  gtk_box_append(GTK_BOX(io_tab_content), config_help_label(
+    "Use the checkboxes to hide unused inputs and outputs from the display.\n"
+    "You can also give each port a custom name to help identify it.\n"
+    "Use the link buttons to pair adjacent channels as stereo."
+  ));
+
+  gtk_widget_set_vexpand(notebook, TRUE);
+  gtk_box_append(GTK_BOX(io_tab_content), notebook);
+
+  // Restore saved I/O tab and connect signal to save tab changes
+  setup_notebook_tab_persistence(
+    GTK_NOTEBOOK(notebook), card, CONFIG_IO_TAB_KEY
+  );
+
+  GtkWidget *io_tab_label = gtk_label_new("I/O Configuration");
+  g_object_set_data(
+    G_OBJECT(io_tab_content), PAGE_ID_KEY, (gpointer)"io-config"
+  );
+  gtk_notebook_append_page(
+    GTK_NOTEBOOK(top_notebook), io_tab_content, io_tab_label
+  );
 }
