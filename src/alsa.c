@@ -1396,26 +1396,16 @@ static void complete_card_init(struct alsa_card *card) {
     card->best_firmware_version_4 = scarlett4_get_best_firmware_version(card->pid);
 
     // Read current device firmware version
-    struct alsa_elem *fw_elem = get_elem_by_name(card->elems, "Firmware Version");
-    if (fw_elem && fw_elem->count == 4) {
-      long *values = alsa_get_elem_int_values(fw_elem);
-      if (values) {
-        for (int i = 0; i < 4; i++)
-          card->firmware_version_4[i] = values[i];
-        g_free(values);
-      }
-    }
+    firmware_version_from_elem(
+      get_elem_by_name(card->elems, "Firmware Version"),
+      card->firmware_version_4
+    );
 
     // Read current device ESP firmware version
-    struct alsa_elem *esp_elem = get_elem_by_name(card->elems, "ESP Firmware Version");
-    if (esp_elem && esp_elem->count == 4) {
-      long *values = alsa_get_elem_int_values(esp_elem);
-      if (values) {
-        for (int i = 0; i < 4; i++)
-          card->esp_firmware_version[i] = values[i];
-        g_free(values);
-      }
-    }
+    firmware_version_from_elem(
+      get_elem_by_name(card->elems, "ESP Firmware Version"),
+      card->esp_firmware_version
+    );
   }
 
   if (card->serial) {

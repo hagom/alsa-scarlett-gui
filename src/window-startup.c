@@ -7,6 +7,7 @@
 #include "gtkhelper.h"
 #include "scarlett2.h"
 #include "scarlett2-ioctls.h"
+#include "scarlett4-firmware.h"
 #include "widget-boolean.h"
 #include "widget-drop-down.h"
 #include "window-startup.h"
@@ -353,35 +354,22 @@ static void add_reset_actions(
 
   // FCP/Scarlett4 devices use 4-valued firmware versions
   if (card->driver_type == DRIVER_TYPE_SOCKET && card->best_firmware_version_4) {
-    long *current = alsa_get_elem_int_values(firmware_elem);
-    if (!current)
+    uint32_t current[FIRMWARE_VERSION_PARTS];
+
+    if (!firmware_version_from_elem(firmware_elem, current))
       return;
 
-    // Compare 4-valued versions
-    int needs_update = 0;
-    for (int i = 0; i < 4; i++) {
-      if ((uint32_t)current[i] < card->best_firmware_version_4[i]) {
-        needs_update = 1;
-        break;
-      }
-      if ((uint32_t)current[i] > card->best_firmware_version_4[i])
-        break;
-    }
-
-    if (!needs_update) {
-      g_free(current);
+    if (firmware_version_cmp(current, card->best_firmware_version_4) >= 0)
       return;
-    }
 
     s = g_strdup_printf(
       "Updating the firmware will reset the interface to its "
       "factory default settings and update the firmware from version "
-      "%ld.%ld.%ld.%ld to %u.%u.%u.%u.",
+      "%u.%u.%u.%u to %u.%u.%u.%u.",
       current[0], current[1], current[2], current[3],
       card->best_firmware_version_4[0], card->best_firmware_version_4[1],
       card->best_firmware_version_4[2], card->best_firmware_version_4[3]
     );
-    g_free(current);
   } else {
     // Scarlett2 devices use single-valued firmware versions
     int firmware_version = alsa_get_elem_value(firmware_elem);

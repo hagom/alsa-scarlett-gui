@@ -22,6 +22,11 @@
 // Compare two firmware versions; returns -1, 0, or 1
 int firmware_version_cmp(const uint32_t *v1, const uint32_t *v2);
 
+/* Read a firmware version from an ALSA element into parts. Returns 0 if
+ * the element is missing or does not hold one.
+ */
+int firmware_version_from_elem(struct alsa_elem *elem, uint32_t *parts);
+
 enum scarlett4_firmware_type {
   SCARLETT4_FIRMWARE_CONTAINER,
   SCARLETT4_FIRMWARE_APP,

@@ -32,6 +32,23 @@ int firmware_version_cmp(const uint32_t *v1, const uint32_t *v2) {
   return 0;
 }
 
+int firmware_version_from_elem(struct alsa_elem *elem, uint32_t *parts) {
+  if (!elem || elem->count != FIRMWARE_VERSION_PARTS)
+    return 0;
+
+  long *values = alsa_get_elem_int_values(elem);
+
+  if (!values)
+    return 0;
+
+  for (int i = 0; i < FIRMWARE_VERSION_PARTS; i++)
+    parts[i] = values[i];
+
+  g_free(values);
+
+  return 1;
+}
+
 // Hash table to store the best firmware for each PID
 struct found_firmware {
   char                         *fn;

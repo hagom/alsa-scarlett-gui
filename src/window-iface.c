@@ -13,6 +13,7 @@
 #include "main.h"
 #include "menu.h"
 #include "routing-lines.h"
+#include "scarlett4-firmware.h"
 #include "window-iface.h"
 #include "window-mixer.h"
 #include "window-routing.h"
@@ -236,22 +237,15 @@ void create_card_window(struct alsa_card *card) {
     min_firmware_version = alsa_get_elem_value(min_firmware_elem);
   }
 
-  // Check if FCP/Scarlett4 device needs firmware update (4-valued comparison)
+  // Check if FCP/Scarlett4 device needs firmware update
   int fcp_needs_update = 0;
   if (card->driver_type == DRIVER_TYPE_SOCKET &&
-      card->best_firmware_version_4 && firmware_elem) {
-    long *current = alsa_get_elem_int_values(firmware_elem);
-    if (current) {
-      for (int i = 0; i < 4; i++) {
-        if ((uint32_t)current[i] < card->best_firmware_version_4[i]) {
-          fcp_needs_update = 1;
-          break;
-        }
-        if ((uint32_t)current[i] > card->best_firmware_version_4[i])
-          break;
-      }
-      g_free(current);
-    }
+      card->best_firmware_version_4) {
+    uint32_t current[FIRMWARE_VERSION_PARTS];
+
+    fcp_needs_update =
+      firmware_version_from_elem(firmware_elem, current) &&
+      firmware_version_cmp(current, card->best_firmware_version_4) < 0;
   }
 
   // set has_levels flag and load preferences before building UI
