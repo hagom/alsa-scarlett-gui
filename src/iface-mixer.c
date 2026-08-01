@@ -1457,14 +1457,18 @@ static GtkWidget *make_channel_select_widget(
   return gtk_label_new(s);
 }
 
-// find the mute control for the given input channel
-static struct alsa_elem *get_input_mute_elem(GPtrArray *elems, int ch) {
+// find a per-input control of the given type for the given channel
+static struct alsa_elem *get_input_ctl_elem(
+  GPtrArray  *elems,
+  const char *control,
+  int         ch
+) {
   for (int i = 0; i < elems->len; i++) {
     struct alsa_elem *elem = g_ptr_array_index(elems, i);
 
     if (!elem->card)
       continue;
-    if (!strstr(elem->name, "Mute Capture Switch"))
+    if (!strstr(elem->name, control))
       continue;
     if (get_num_from_string(elem->name) == ch)
       return elem;
@@ -1472,6 +1476,26 @@ static struct alsa_elem *get_input_mute_elem(GPtrArray *elems, int ch) {
 
   return NULL;
 }
+
+// per-channel input controls ganged in software while a pair without
+// a device link switch is GUI-linked (a device link gangs these
+// itself, all except mute)
+static const char *input_pair_sync_controls[] = {
+  "Input Type Capture Enum",
+  "Impedance Capture Enum",
+  "Gain Capture Volume",
+  "Autogain Capture Switch",
+  "Safe Capture Switch",
+  "Level Capture Enum",
+  "Impedance Switch",
+  "Air Capture Switch",
+  "Air Capture Enum",
+  "Mute Capture Switch",
+  "Pad Capture Switch",
+  "Pad Switch",
+  "Gain Switch",
+  "Phantom Power Capture Switch",
+};
 
 // Main-window channel strip visibility for the analogue input and
 // output grids. A strip covers one channel, or a pair of adjacent
@@ -1950,13 +1974,22 @@ static void setup_input_strips(
     register_io_strip(d);
 
     if (is_pair) {
-      // the device gangs everything of a hw-linked pair except mute
+      // the device gangs everything of a hw-linked pair except mute;
+      // without a device link, gang all the per-channel controls in
+      // software while the pair is GUI-linked
       if (d->hw_link_elem)
         register_pair_elem_sync(
           d->hw_link_elem,
-          get_input_mute_elem(elems, i),
-          get_input_mute_elem(elems, i + 1)
+          get_input_ctl_elem(elems, "Mute Capture Switch", i),
+          get_input_ctl_elem(elems, "Mute Capture Switch", i + 1)
         );
+      else
+        for (int j = 0; j < G_N_ELEMENTS(input_pair_sync_controls); j++)
+          register_pair_elem_sync(
+            link_elem,
+            get_input_ctl_elem(elems, input_pair_sync_controls[j], i),
+            get_input_ctl_elem(elems, input_pair_sync_controls[j], i + 1)
+          );
       i++;
     }
   }
