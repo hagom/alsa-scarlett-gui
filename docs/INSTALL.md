@@ -19,9 +19,10 @@ below.
 4. Run `alsa-scarlett-gui` — it will prompt you to update your
    device firmware if needed
 
-### Scarlett 4th Gen 16i16, 18i16, 18i20
+### Scarlett 4th Gen 16i16, 18i16, 18i20, ISA C8X
 
-1. Ensure you are running Linux 6.14+ (`uname -r` to check)
+1. Ensure you are running Linux 6.14+ (`uname -r` to check) or for
+   ISA C8X, Linux 6.18.39+, 7.1.4+, or 7.2+.
 2. Install
    [fcp-support](https://github.com/geoffreybennett/fcp-support/releases)
    — the `fcp-server` daemon will start automatically when you
@@ -60,6 +61,7 @@ the first kernel version that the driver was included in:
 | Scarlett 4th Gen | Solo, 2i2, 4i4 | Scarlett2 Mixer Driver | 6.8+ |
 | Scarlett 4th Gen | 16i16, 18i16, 18i20 | FCP (Focusrite Control Protocol) Driver | 6.14+ |
 | Clarett USB and Clarett+ | 2Pre, 4Pre, 8Pre | Scarlett2 Mixer Driver | 6.7+ |
+| ISA | C8X | FCP (Focusrite Control Protocol) Driver | 6.18.39+, 7.1.4+, 7.2+ |
 | Vocaster | One, Two | Scarlett2 Mixer Driver | 6.10+ |
 
 \* The small 1st Gen and 2nd Gen models don’t have any proprietary

@@ -144,7 +144,7 @@ channel access, select the "Pro Audio" profile:
 
 1. Open `pavucontrol` (PulseAudio Volume Control)
 2. Go to the Configuration tab
-3. Find your Scarlett/Clarett/Vocaster
+3. Find your Scarlett/Clarett/ISA/Vocaster
 4. Change the profile to "Pro Audio"
 
 This gives you access to all channels individually instead of
