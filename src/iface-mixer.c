@@ -1628,6 +1628,20 @@ static void set_io_grid_span(GtkWidget *grid, GtkWidget *child, int span) {
   gtk_grid_layout_child_set_column_span(lc, span);
 }
 
+static void get_io_grid_position(
+  GtkWidget *grid,
+  GtkWidget *child,
+  int       *col,
+  int       *span
+) {
+  GtkLayoutManager *lm = gtk_widget_get_layout_manager(grid);
+  GtkGridLayoutChild *lc =
+    GTK_GRID_LAYOUT_CHILD(gtk_layout_manager_get_layout_child(lm, child));
+
+  *col = gtk_grid_layout_child_get_column(lc);
+  *span = gtk_grid_layout_child_get_column_span(lc);
+}
+
 static void io_strip_updated(struct alsa_elem *elem, void *private) {
   struct io_strip *d = private;
 
@@ -1797,6 +1811,75 @@ static struct routing_src *get_analogue_input_src(
   return NULL;
 }
 
+// A control that spans several input channels (e.g. a 48V switch
+// covering four inputs) is shared by more than one input strip, so its
+// visibility can't be driven by any single strip's enable state. It is
+// shown while any one of the channels it covers is enabled.
+struct span_visibility {
+  GtkWidget *widget;
+  GPtrArray *enable_elems;
+};
+
+static void span_visibility_updated(struct alsa_elem *elem, void *private) {
+  struct span_visibility *sv = private;
+
+  int visible = 0;
+  for (guint i = 0; i < sv->enable_elems->len; i++)
+    if (alsa_get_elem_value(g_ptr_array_index(sv->enable_elems, i))) {
+      visible = 1;
+      break;
+    }
+
+  gtk_widget_set_visible(sv->widget, visible);
+}
+
+static void span_visibility_destroy(GtkWidget *widget, gpointer user_data) {
+  struct span_visibility *sv = user_data;
+
+  for (guint i = 0; i < sv->enable_elems->len; i++)
+    alsa_elem_remove_callbacks_by_data(
+      g_ptr_array_index(sv->enable_elems, i), sv
+    );
+  g_ptr_array_free(sv->enable_elems, TRUE);
+  g_free(sv);
+}
+
+// Make a spanning control follow the enable state of the channels
+// from..to. Does nothing (leaving the control visible) if the device
+// has no per-input enables.
+static void manage_span_visibility(
+  struct alsa_card *card,
+  GtkWidget        *widget,
+  int               from,
+  int               to
+) {
+  GPtrArray *enable_elems = g_ptr_array_new();
+  for (int channel = from; channel <= to; channel++) {
+    struct routing_src *src = get_analogue_input_src(card, channel);
+    if (src && src->enable_elem)
+      g_ptr_array_add(enable_elems, src->enable_elem);
+  }
+
+  if (!enable_elems->len) {
+    g_ptr_array_free(enable_elems, TRUE);
+    return;
+  }
+
+  struct span_visibility *sv = g_malloc0(sizeof(*sv));
+  sv->widget = widget;
+  sv->enable_elems = enable_elems;
+
+  for (guint i = 0; i < enable_elems->len; i++)
+    alsa_elem_add_callback(
+      g_ptr_array_index(enable_elems, i), span_visibility_updated, sv, NULL
+    );
+  g_signal_connect(
+    widget, "destroy", G_CALLBACK(span_visibility_destroy), sv
+  );
+
+  span_visibility_updated(NULL, sv);
+}
+
 static void setup_input_strips(
   struct alsa_card *card,
   GtkWidget        *grid,
@@ -1842,13 +1925,26 @@ static void setup_input_strips(
     }
 
     for (int row = 1; row < rows; row++) {
-      g_ptr_array_add(
-        d->left, gtk_grid_get_child_at(GTK_GRID(grid), i - 1, row)
-      );
-      g_ptr_array_add(
-        d->right,
-        is_pair ? gtk_grid_get_child_at(GTK_GRID(grid), i, row) : NULL
-      );
+      GtkWidget *l = gtk_grid_get_child_at(GTK_GRID(grid), i - 1, row);
+      GtkWidget *r =
+        is_pair ? gtk_grid_get_child_at(GTK_GRID(grid), i, row) : NULL;
+
+      // a control spanning several columns (e.g. a 48V switch covering
+      // four inputs) covers both of this pair's cells; the strips must
+      // not drive its span or visibility. Register its visibility once,
+      // on the first strip that reaches its leftmost column, then keep
+      // it out of both channels' widget lists.
+      if (l && r == l) {
+        int col, span;
+        get_io_grid_position(grid, l, &col, &span);
+        if (col == i - 1)
+          manage_span_visibility(card, l, col + 1, col + span);
+        l = NULL;
+        r = NULL;
+      }
+
+      g_ptr_array_add(d->left, l);
+      g_ptr_array_add(d->right, r);
     }
 
     register_io_strip(d);
