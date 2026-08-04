@@ -429,7 +429,7 @@ Standalone mode is supported on all devices supported by the kernel
 driver. Even the Scarlett 3rd Gen 4i4 (which is bus-powered) will
 operate in standalone mode.
 
-### Phantom Power Persistence (Scarlett 3rd Gen only)
+### Phantom Power Persistence
 
 When Phantom Power Persistence is enabled, the interface will restore
 the previous Phantom Power/48V setting when the interface is turned
