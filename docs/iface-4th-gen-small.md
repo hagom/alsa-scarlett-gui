@@ -468,7 +468,6 @@ which meter corresponds to which source or sink.
 | Ctrl-M | Mixer Window |
 | Ctrl-L | Levels Window |
 | Ctrl-G | Configuration Window |
-| Ctrl-T | Startup Window |
 | Ctrl-H | Supported Hardware |
 | Ctrl-/ | About |
 

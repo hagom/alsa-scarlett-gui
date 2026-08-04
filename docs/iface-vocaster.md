@@ -185,7 +185,6 @@ the Presets button or File menu. See
 | Ctrl-L | Levels Window |
 | Ctrl-D | DSP Window |
 | Ctrl-G | Configuration Window |
-| Ctrl-T | Startup Window |
 | Ctrl-H | Supported Hardware |
 | Ctrl-/ | About |
 

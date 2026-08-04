@@ -64,8 +64,9 @@ contain additional controls, described in the following sections:
 - [Routing](#routing)
 - [Mixer](#mixer)
 
-The Levels and Startup windows that are available for later-generation
-interfaces are not available for 1st Gen interfaces due to driver limitations.
+The Levels window and the Startup configuration tab that are available
+for later-generation interfaces are not available for 1st Gen
+interfaces due to driver limitations.
 
 ### Global Controls
 

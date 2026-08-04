@@ -410,11 +410,12 @@ which meter corresponds to which source or sink.
 
 ## Startup
 
-The Startup window is used to configure settings that are
-applied/relevant when the interface is powered on. Open it with View →
-Startup or press Ctrl-T.
+The Startup tab is used to configure settings that are
+applied/relevant when the interface is powered on. Open the
+Configuration window with View → Configuration or press Ctrl-G, then
+select the Startup tab.
 
-![Startup Window](../img/window-startup.png)
+![Startup Tab](../img/window-startup.png)
 
 ### Standalone
 
@@ -459,7 +460,6 @@ here.
 | Ctrl-M | Mixer Window |
 | Ctrl-L | Levels Window |
 | Ctrl-G | Configuration Window |
-| Ctrl-T | Startup Window |
 | Ctrl-H | Supported Hardware |
 | Ctrl-/ | About |
 

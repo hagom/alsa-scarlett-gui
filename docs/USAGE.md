@@ -59,8 +59,9 @@ restart the interface, and in a moment the main window will appear.
 
 ## Startup Controls
 
-The View → Startup menu option opens a window to configure settings
-that only take effect when the interface is powered on.
+Startup settings — those that only take effect when the interface is
+powered on — are on the Startup tab of the Configuration window (View
+→ Configuration, Ctrl-G).
 
 The options common to most interfaces are:
 
@@ -119,13 +120,13 @@ distribution contains a sample file for every supported model.
 | Ctrl-O   | Load Configuration     |
 | Ctrl-S   | Save Configuration     |
 | Ctrl-I   | Interface Simulation   |
+| Ctrl-W   | Close Window           |
 | Ctrl-Q   | Exit                   |
 | Ctrl-R   | Routing Window         |
 | Ctrl-M   | Mixer Window           |
 | Ctrl-L   | Levels Window          |
 | Ctrl-D   | DSP Window             |
 | Ctrl-G   | Configuration Window   |
-| Ctrl-T   | Startup Window         |
 | Ctrl-H   | Supported Hardware     |
 | Ctrl-/   | About                  |
 
