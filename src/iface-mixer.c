@@ -1543,7 +1543,9 @@ static char *get_name_elem_string(struct alsa_elem *elem) {
 }
 
 // Label for one channel of an output strip: custom name if set,
-// "HP<n> L/R" for headphone outputs, otherwise the channel number
+// "HP<n> (L/R)" for a dedicated headphone channel, "N/HP<n> (L/R)"
+// for a line output channel that also carries headphone output,
+// otherwise the channel number
 static char *output_channel_label_text(struct routing_snk *snk, int num) {
   if (snk) {
     char *custom = get_name_elem_string(snk->custom_name_elem);
@@ -1551,10 +1553,20 @@ static char *output_channel_label_text(struct routing_snk *snk, int num) {
       return custom;
 
     char *def = get_snk_default_name_formatted(snk, 0);
+    const char *lr = def && strstr(def, "(R)") ? "R" : "L";
+
     if (def && strncmp(def, "Headphones ", 11) == 0) {
-      char *label = g_strdup_printf(
-        "HP%d %s", get_num_from_string(def), strstr(def, "(R)") ? "R" : "L"
-      );
+      char *label = g_strdup_printf("HP%d (%s)", get_num_from_string(def), lr);
+      g_free(def);
+      return label;
+    }
+
+    char *hp = def ? strstr(def, "/Headphones") : NULL;
+    if (hp) {
+      int hp_num = get_num_from_string(hp + 1);
+      char *label = hp_num >= 0
+        ? g_strdup_printf("%d/HP%d (%s)", num, hp_num, lr)
+        : g_strdup_printf("%d/HP (%s)", num, lr);
       g_free(def);
       return label;
     }
@@ -1565,7 +1577,9 @@ static char *output_channel_label_text(struct routing_snk *snk, int num) {
 }
 
 // Label for a collapsed output pair: custom pair name if set, "HP<n>"
-// for headphone outputs, otherwise the channel number range
+// for a dedicated headphone pair, "N–N+1/HP<n>" for a line output
+// pair that also carries headphone output, otherwise the channel
+// number range
 static char *output_pair_label_text(struct routing_snk *snk_l, int num) {
   if (snk_l) {
     char *custom = get_name_elem_string(get_snk_pair_name_elem(snk_l));
@@ -1575,6 +1589,16 @@ static char *output_pair_label_text(struct routing_snk *snk_l, int num) {
     char *def = get_snk_default_pair_name(snk_l);
     if (def && strncmp(def, "Headphones ", 11) == 0) {
       char *label = g_strdup_printf("HP%d", get_num_from_string(def));
+      g_free(def);
+      return label;
+    }
+
+    char *hp = def ? strstr(def, "/Headphones") : NULL;
+    if (hp) {
+      int hp_num = get_num_from_string(hp + 1);
+      char *label = hp_num >= 0
+        ? g_strdup_printf("%d–%d/HP%d", num, num + 1, hp_num)
+        : g_strdup_printf("%d–%d/HP", num, num + 1);
       g_free(def);
       return label;
     }
