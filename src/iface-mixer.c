@@ -1668,6 +1668,22 @@ static struct routing_snk *get_headphones_snk(struct alsa_card *card) {
   }
 }
 
+// Register an output gain widget so its dial's embedded level meter is
+// fed from the given routing sink by the level update timer.
+static void register_output_gain_widget(
+  struct alsa_card   *card,
+  GtkWidget          *widget,
+  int                 port_num,
+  struct routing_snk *r_snk
+) {
+  struct output_gain_widget *og = g_malloc(sizeof(struct output_gain_widget));
+
+  og->widget = widget;
+  og->port_num = port_num;
+  og->r_snk = r_snk;
+  card->output_gain_widgets = g_list_append(card->output_gain_widgets, og);
+}
+
 static void set_io_grid_span(GtkWidget *grid, GtkWidget *child, int span) {
   GtkLayoutManager *lm = gtk_widget_get_layout_manager(grid);
   GtkGridLayoutChild *lc =
@@ -2436,13 +2452,9 @@ static void create_output_controls(
           GTK_GRID(output_grid), w, elem->lr_num - 1 + line_1_col, 2, 1, 1
         );
 
-        // store widget in card's list for level updates
-        struct routing_snk *r_snk = get_output_r_snk(card, elem->lr_num);
-        struct output_gain_widget *og = g_malloc(sizeof(struct output_gain_widget));
-        og->widget = w;
-        og->port_num = elem->lr_num;
-        og->r_snk = r_snk;
-        card->output_gain_widgets = g_list_append(card->output_gain_widgets, og);
+        register_output_gain_widget(
+          card, w, elem->lr_num, get_output_r_snk(card, elem->lr_num)
+        );
 
       } else if (strstr(elem->name, "Playback Switch")) {
         if (elem->lr_num <= output_count)
@@ -2483,10 +2495,12 @@ static void create_output_controls(
 
       GtkWidget *l = gtk_label_new(gen4 ? "Line 1–2" : "HW");
       gtk_grid_attach(GTK_GRID(output_grid), l, 0, 0, 1, 1);
-      if (gen4)
-        bind_output_pair_label(l, get_analogue_output_snk(card, 1));
       if (gen4) {
-        w = make_gain_alsa_elem(elem, 1, WIDGET_GAIN_TAPER_GEN4_VOLUME, 0, FALSE);
+        struct routing_snk *snk = get_analogue_output_snk(card, 1);
+
+        bind_output_pair_label(l, snk);
+        w = make_gain_alsa_elem(elem, 1, WIDGET_GAIN_TAPER_GEN4_VOLUME, 0, TRUE);
+        register_output_gain_widget(card, w, 1, snk);
       } else {
         w = make_gain_alsa_elem(elem, 1, WIDGET_GAIN_TAPER_LOG, 0, FALSE);
       }
@@ -2503,13 +2517,16 @@ static void create_output_controls(
       gtk_grid_attach(GTK_GRID(output_grid), w, 0, 2, 1, 1);
     } else if (strcmp(elem->name, "Headphone Playback Volume") == 0) {
       GtkWidget *l = gtk_label_new("Headphones");
-      bind_output_pair_label(l, get_headphones_snk(card));
+      struct routing_snk *snk = get_headphones_snk(card);
+
+      bind_output_pair_label(l, snk);
       gtk_widget_set_tooltip_text(
         l,
         "This control shows the setting of the headphone volume knob."
       );
       gtk_grid_attach(GTK_GRID(output_grid), l, 1, 0, 1, 1);
-      w = make_gain_alsa_elem(elem, 1, WIDGET_GAIN_TAPER_GEN4_VOLUME, 0, FALSE);
+      w = make_gain_alsa_elem(elem, 1, WIDGET_GAIN_TAPER_GEN4_VOLUME, 0, TRUE);
+      register_output_gain_widget(card, w, snk ? snk->elem->lr_num : 0, snk);
       gtk_grid_attach(GTK_GRID(output_grid), w, 1, 2, 1, 1);
     } else if (strcmp(elem->name, "Mute Playback Switch") == 0) {
       w = make_boolean_alsa_elem(
