@@ -5,6 +5,7 @@
 
 #include <stdint.h>
 
+#include "alsa.h"
 #include "firmware-probe.h"
 #include "scarlett4-firmware.h"
 

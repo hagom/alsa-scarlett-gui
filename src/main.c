@@ -9,6 +9,7 @@
 #include "firmware-dir.h"
 #include "main.h"
 #include "menu.h"
+#include "online-check.h"
 #include "window-consent.h"
 #include "window-hardware.h"
 #include "window-iface.h"
@@ -48,6 +49,13 @@ static gboolean startup_complete;
  * all, so the cards found during startup are presented here.
  */
 static void startup_continue(GtkApplication *app, gpointer user_data) {
+  /* Before the cards are presented, so that the cached index is loaded
+   * by the time the first card is compared against it.
+   */
+#ifdef HAVE_ONLINE_UPDATE
+  online_check_start();
+#endif
+
   window_iface_init();
 
   GArray *cards = alsa_get_cards();

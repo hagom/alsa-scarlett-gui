@@ -24,6 +24,7 @@ struct monitor_group_elems {
 // forward definitions
 struct alsa_elem;
 struct alsa_card;
+struct card_update_status;
 
 // typedef for callbacks to update widgets when the alsa element
 // notifies of a change
@@ -281,6 +282,9 @@ struct alsa_card {
   // For scarlett4 (big Gen 4) devices with 4-valued versions
   uint32_t            firmware_version_4[4];
   uint32_t            esp_firmware_version[4];
+
+  // what the online index offers this card, owned by online-check.c
+  struct card_update_status *update_status;
   snd_ctl_t          *handle;
   struct pollfd       pfd;
   GPtrArray          *elems;

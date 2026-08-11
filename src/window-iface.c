@@ -14,6 +14,7 @@
 #include "iface-waiting.h"
 #include "main.h"
 #include "menu.h"
+#include "online-check.h"
 #include "routing-lines.h"
 #include "scarlett4-firmware.h"
 #include "window-iface.h"
@@ -345,17 +346,28 @@ static void destroy_card_window(struct alsa_card *card) {
   create_no_card_window();
 }
 
-// alsa.c reports card lifecycle events; presenting them is this file's
-// business
+/* alsa.c reports card lifecycle events; presenting them is this file's
+ * business.
+ *
+ * The update status is computed before the window that shows it is
+ * built, and discarded after the window that showed it is gone.
+ */
 static void card_lifecycle_ready(struct alsa_card *card) {
+#ifdef HAVE_ONLINE_UPDATE
+  online_check_card_ready(card);
+#endif
   create_card_window(card);
 }
 
 static void card_lifecycle_closing(struct alsa_card *card, int gone) {
-  if (gone)
+  if (gone) {
     destroy_card_window(card);
-  else
+#ifdef HAVE_ONLINE_UPDATE
+    online_check_card_gone(card);
+#endif
+  } else {
     close_card_window(card);
+  }
 }
 
 void window_iface_init(void) {
