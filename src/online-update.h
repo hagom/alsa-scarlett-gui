@@ -82,14 +82,51 @@ struct online_update_index *online_update_load_cached_index(void);
  */
 gboolean online_update_check_is_due(void);
 
+/* Called as a download proceeds, with the bytes received so far and the
+ * total expected. total is 0 only if the index entry gave no size and
+ * the server did not either.
+ */
+typedef void (*online_update_progress_cb)(
+  gsize    received,
+  gsize    total,
+  gpointer user_data
+);
+
+/* Where a firmware entry's download would be saved, whether or not it
+ * has been. Free with g_free().
+ */
+char *online_update_download_path(const struct online_firmware *firmware);
+
+/* Whether this firmware has already been downloaded: the file is in
+ * place at the size and checksum the index promised. A file that is
+ * there but does not match is a partial, superseded or corrupt one; it
+ * is deleted and does not count, so the caller fetches it again. Only a
+ * regular file is removed.
+ *
+ * This is what stops a firmware being fetched on every launch when the
+ * version it turns out to hold does not become the best one available —
+ * an index whose version disagrees with its payload, or a payload older
+ * than what the device already runs.
+ *
+ * Reads and hashes the file, so call it only when a download is wanted.
+ */
+gboolean online_update_already_downloaded(
+  const struct online_firmware *firmware
+);
+
 /* Download a firmware file into the cache directory, verifying its
  * size and SHA256 against the index entry before putting it in place.
  * The same callback contract as online_update_fetch_index() applies.
+ *
+ * progress may be NULL. When it is not, the body is read incrementally
+ * so that it can be reported; it is called from the main loop, never
+ * after callback has run.
  */
 void online_update_download(
   const struct online_firmware *firmware,
   online_update_download_cb     callback,
-  gpointer                      user_data
+  gpointer                      user_data,
+  online_update_progress_cb     progress
 );
 
 void online_update_index_free(struct online_update_index *index);

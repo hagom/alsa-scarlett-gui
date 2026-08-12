@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/utsname.h>
 
 #include <glib/gstdio.h>
@@ -615,31 +616,60 @@ typedef void (*request_done_cb)(
   const char     *error
 );
 
+/* Reports bytes transferred so far. total is the expected size, or 0
+ * when the server did not say.
+ */
+typedef void (*request_progress_cb)(
+  gsize    received,
+  gsize    total,
+  gpointer user_data
+);
+
+// How much of the body to ask for at a time when streaming
+#define READ_CHUNK_SIZE (64 * 1024)
+
 /* A GET request whose body is read into memory. done() is called
  * exactly once; either way the request is freed afterwards.
+ *
+ * The body is read either in one call, or — when progress is wanted — a
+ * chunk at a time into buffer, which is why the size cap is enforced as
+ * it grows as well as from the headers.
  */
 struct request {
-  SoupMessage     *msg;
-  GCancellable    *cancellable;
-  gsize            max_size;
-  gboolean         too_large;
-  request_done_cb  done;
-  gpointer         callback;
-  gpointer         user_data;
+  SoupMessage         *msg;
+  GCancellable        *cancellable;
+  gsize                max_size;
+  gboolean             too_large;
+  request_done_cb      done;
+  gpointer             callback;
+  gpointer             user_data;
+
+  // streaming reads only
+  GInputStream        *stream;
+  GByteArray          *buffer;
+  gsize                expected_size;
+  request_progress_cb  progress;
 };
 
-static void request_finished(
-  GObject      *source,
-  GAsyncResult *result,
-  gpointer      user_data
+static void request_free(struct request *req) {
+  if (req->stream)
+    g_object_unref(req->stream);
+  if (req->buffer)
+    g_byte_array_unref(req->buffer);
+
+  g_object_unref(req->cancellable);
+  g_object_unref(req->msg);
+  g_free(req);
+}
+
+/* Hand the body to done() if the transfer and the HTTP status allow it,
+ * then free the request. bytes is NULL when the transfer itself failed.
+ */
+static void request_complete(
+  struct request *req,
+  GBytes         *bytes,
+  GError         *gerror
 ) {
-  struct request *req = user_data;
-  GError *gerror = NULL;
-
-  GBytes *bytes = soup_session_send_and_read_finish(
-    SOUP_SESSION(source), result, &gerror
-  );
-
   if (!bytes) {
     const char *error = "Request failed";
 
@@ -649,7 +679,6 @@ static void request_finished(
       error = gerror->message;
 
     req->done(req, NULL, error);
-    g_clear_error(&gerror);
   } else {
     SoupStatus status = soup_message_get_status(req->msg);
 
@@ -664,13 +693,133 @@ static void request_finished(
     } else {
       req->done(req, bytes, NULL);
     }
-
-    g_bytes_unref(bytes);
   }
 
-  g_object_unref(req->cancellable);
-  g_object_unref(req->msg);
-  g_free(req);
+  request_free(req);
+}
+
+static void request_finished(
+  GObject      *source,
+  GAsyncResult *result,
+  gpointer      user_data
+) {
+  struct request *req = user_data;
+  GError *gerror = NULL;
+
+  GBytes *bytes = soup_session_send_and_read_finish(
+    SOUP_SESSION(source), result, &gerror
+  );
+
+  request_complete(req, bytes, gerror);
+
+  g_clear_error(&gerror);
+
+  if (bytes)
+    g_bytes_unref(bytes);
+}
+
+static void request_read_chunk(struct request *req);
+
+static void request_chunk_read(
+  GObject      *source,
+  GAsyncResult *result,
+  gpointer      user_data
+) {
+  struct request *req = user_data;
+  GError *gerror = NULL;
+
+  GBytes *chunk = g_input_stream_read_bytes_finish(
+    G_INPUT_STREAM(source), result, &gerror
+  );
+
+  if (!chunk) {
+    request_complete(req, NULL, gerror);
+    g_clear_error(&gerror);
+    return;
+  }
+
+  gsize length = g_bytes_get_size(chunk);
+
+  // A zero-length read is the end of the body
+  if (!length) {
+    g_bytes_unref(chunk);
+
+    GBytes *bytes = g_bytes_new(req->buffer->data, req->buffer->len);
+
+    request_complete(req, bytes, NULL);
+    g_bytes_unref(bytes);
+    return;
+  }
+
+  /* Enforce the cap as the body grows: a server that understates or
+   * omits Content-Length must not be able to make this read for ever.
+   */
+  if (req->buffer->len + length > req->max_size) {
+    g_bytes_unref(chunk);
+    req->too_large = TRUE;
+    request_complete(req, NULL, NULL);
+    return;
+  }
+
+  g_byte_array_append(
+    req->buffer, g_bytes_get_data(chunk, NULL), length
+  );
+  g_bytes_unref(chunk);
+
+  if (req->progress)
+    req->progress(req->buffer->len, req->expected_size, req->user_data);
+
+  request_read_chunk(req);
+}
+
+static void request_read_chunk(struct request *req) {
+  g_input_stream_read_bytes_async(
+    req->stream, READ_CHUNK_SIZE, G_PRIORITY_DEFAULT, req->cancellable,
+    request_chunk_read, req
+  );
+}
+
+// The response headers have arrived; read the body a chunk at a time
+static void request_sent(
+  GObject      *source,
+  GAsyncResult *result,
+  gpointer      user_data
+) {
+  struct request *req = user_data;
+  GError *gerror = NULL;
+
+  req->stream = soup_session_send_finish(
+    SOUP_SESSION(source), result, &gerror
+  );
+
+  if (!req->stream) {
+    request_complete(req, NULL, gerror);
+    g_clear_error(&gerror);
+    return;
+  }
+
+  /* A non-OK status has no body worth reading, and request_complete()
+   * turns it into the message to present.
+   */
+  if (soup_message_get_status(req->msg) != SOUP_STATUS_OK) {
+    GBytes *empty = g_bytes_new(NULL, 0);
+
+    request_complete(req, empty, NULL);
+    g_bytes_unref(empty);
+    return;
+  }
+
+  goffset length = soup_message_headers_get_content_length(
+    soup_message_get_response_headers(req->msg)
+  );
+
+  req->expected_size = length > 0 ? (gsize)length : 0;
+  req->buffer = g_byte_array_new();
+
+  if (req->progress)
+    req->progress(0, req->expected_size, req->user_data);
+
+  request_read_chunk(req);
 }
 
 /* Refuse an oversized body before reading it into memory. The length
@@ -689,13 +838,18 @@ static void request_got_headers(SoupMessage *msg, gpointer user_data) {
   }
 }
 
-// Returns FALSE without calling done() if the URL is unusable
+/* Returns FALSE without calling done() if the URL is unusable.
+ *
+ * With a progress callback the body is read a chunk at a time so that
+ * it can be reported; without one it is read in a single call.
+ */
 static gboolean request_start(
-  const char      *url,
-  gsize            max_size,
-  request_done_cb  done,
-  gpointer         callback,
-  gpointer         user_data
+  const char          *url,
+  gsize                max_size,
+  request_done_cb      done,
+  gpointer             callback,
+  gpointer             user_data,
+  request_progress_cb  progress
 ) {
   SoupMessage *msg = soup_message_new(SOUP_METHOD_GET, url);
 
@@ -710,15 +864,22 @@ static gboolean request_start(
   req->done = done;
   req->callback = callback;
   req->user_data = user_data;
+  req->progress = progress;
 
   g_signal_connect(
     msg, "got-headers", G_CALLBACK(request_got_headers), req
   );
 
-  soup_session_send_and_read_async(
-    get_session(), msg, G_PRIORITY_DEFAULT, req->cancellable,
-    request_finished, req
-  );
+  if (progress)
+    soup_session_send_async(
+      get_session(), msg, G_PRIORITY_DEFAULT, req->cancellable,
+      request_sent, req
+    );
+  else
+    soup_session_send_and_read_async(
+      get_session(), msg, G_PRIORITY_DEFAULT, req->cancellable,
+      request_finished, req
+    );
 
   return TRUE;
 }
@@ -754,7 +915,7 @@ void online_update_fetch_index(
     "%s?prog=alsa-scarlett-gui&ver=%s", get_index_url(), VERSION
   );
   gboolean started = request_start(
-    url, MAX_INDEX_SIZE, fetch_index_done, callback, user_data
+    url, MAX_INDEX_SIZE, fetch_index_done, callback, user_data, NULL
   );
   g_free(url);
 
@@ -763,11 +924,27 @@ void online_update_fetch_index(
 }
 
 struct download {
-  char     *sha256;
-  gsize     size;
-  char     *fn;
-  gpointer  user_data;  // the caller's, not the request's
+  char                       *sha256;
+  gsize                       size;
+  char                       *fn;
+  gpointer                    user_data;  // the caller's, not the request's
+  online_update_progress_cb   progress;
 };
+
+/* The request layer reports raw byte counts; the caller wants them
+ * against the size the index promised, which is the figure the
+ * verification will hold the transfer to.
+ */
+static void download_progress(
+  gsize    received,
+  gsize    total,
+  gpointer user_data
+) {
+  struct download *dl = user_data;
+
+  if (dl->progress)
+    dl->progress(received, dl->size ? dl->size : total, dl->user_data);
+}
 
 /* Write the verified data to a temporary file in the same directory
  * and rename it into place, so a partial or interrupted write can
@@ -840,25 +1017,75 @@ static void download_done(
   g_free(dl);
 }
 
+char *online_update_download_path(const struct online_firmware *firmware) {
+  // parse_firmware_entry() rejects entries without a usable basename
+  return g_build_filename(
+    g_get_user_cache_dir(), "alsa-scarlett-gui", "firmware",
+    firmware->basename, NULL
+  );
+}
+
+gboolean online_update_already_downloaded(
+  const struct online_firmware *firmware
+) {
+  char *fn = online_update_download_path(firmware);
+  GStatBuf st;
+  gboolean present = FALSE;
+
+  /* Anything here that is not what the index describes is deleted, so
+   * that a file which can never be installed does not sit in the cache
+   * being skipped. Otherwise the firmware reader rejects it, it never
+   * becomes the best local version, and the status keeps asking for a
+   * download that this function keeps declining.
+   *
+   * The size is the cheap test and the checksum is the one that decides;
+   * a partial download fails the first, a corrupt one the second.
+   *
+   * Reached only when a download is wanted and a file is already there,
+   * which does not happen once one has arrived intact.
+   */
+  if (g_stat(fn, &st) == 0 && S_ISREG(st.st_mode)) {
+    char *contents;
+    gsize length;
+
+    if ((gsize)st.st_size == firmware->size &&
+        g_file_get_contents(fn, &contents, &length, NULL)) {
+      char *sha256 = g_compute_checksum_for_data(
+        G_CHECKSUM_SHA256, (const guchar *)contents, length
+      );
+
+      present = !strcmp(sha256, firmware->sha256);
+
+      g_free(sha256);
+      g_free(contents);
+    }
+
+    if (!present)
+      g_unlink(fn);
+  }
+
+  g_free(fn);
+
+  return present;
+}
+
 void online_update_download(
   const struct online_firmware *firmware,
   online_update_download_cb     callback,
-  gpointer                      user_data
+  gpointer                      user_data,
+  online_update_progress_cb     progress
 ) {
   struct download *dl = g_new0(struct download, 1);
 
   dl->sha256 = g_strdup(firmware->sha256);
   dl->size = firmware->size;
   dl->user_data = user_data;
-
-  // parse_firmware_entry() rejects entries without a usable basename
-  dl->fn = g_build_filename(
-    g_get_user_cache_dir(), "alsa-scarlett-gui", "firmware",
-    firmware->basename, NULL
-  );
+  dl->progress = progress;
+  dl->fn = online_update_download_path(firmware);
 
   if (!request_start(
-        firmware->url, firmware->size, download_done, callback, dl
+        firmware->url, firmware->size, download_done, callback, dl,
+        download_progress
       )) {
     g_free(dl->sha256);
     g_free(dl->fn);
