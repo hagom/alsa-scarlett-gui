@@ -745,21 +745,36 @@ button.toggle {
 }
 
 /* Holds the update notice above the interface's own frame, which keeps
- * its padding, so this one adds none of its own
+ * its padding, so this one adds none of its own. Padding here is added
+ * to the interface's on every window that has a holder, whether or not
+ * the notice inside it is showing anything.
  */
 .notice-holder {
   padding: 0;
 }
 
-/* Firmware and app update notice in the main window */
+/* Firmware and app update notice in the main window. The side margins
+ * keep a notice too wide to centre short of the window edge, which the
+ * holder's padding used to do at the cost of widening every window.
+ */
 .update-notice {
-  margin: 10px 0 0 0;
-  font-size: smaller;
+  margin: 10px 15px 0 15px;
   color: #c0c0c0;
   background: #1c1c1c;
   padding: 6px 14px;
   border: 1px solid #404040;
   border-radius: 12px;
+}
+
+.update-notice label {
+  font-size: smaller;
+}
+
+/* Kept small enough not to make the notice taller than its text */
+.update-notice button {
+  font-size: smaller;
+  min-height: 0;
+  padding: 2px 10px;
 }
 
 /* Incidental text: present, but not competing with the question */

@@ -12,6 +12,11 @@
  * widget hides itself while there is nothing to report, and updates as
  * the check finds things.
  *
+ * It carries an Update button while the offered firmware is already in
+ * the firmware store, which opens the same update window iface-update.c
+ * does. Firmware that would have to be downloaded first is reported
+ * without one.
+ *
  * Returns NULL in a build without online update support, so the caller
  * appends nothing.
  */
