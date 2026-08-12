@@ -63,8 +63,15 @@ const struct card_update_status *online_check_get_status(
   struct alsa_card *card
 );
 
+/* The version of this app the index lists, when it is newer than the
+ * one running, otherwise NULL. Valid until the index is replaced, which
+ * the status changed callbacks report.
+ */
+const char *online_check_get_client_update(void);
+
 /* Register interest in status changes, called with the card whose
- * status was computed or discarded. A fetch completing recomputes every
+ * status was computed or discarded, or NULL when a fetch changed the
+ * app's own available version. A fetch completing recomputes every
  * connected card, so a notice built from a status can follow the index
  * rather than only the card.
  *

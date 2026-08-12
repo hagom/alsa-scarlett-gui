@@ -233,16 +233,26 @@ static void recompare_all_cards(void) {
   }
 }
 
-/* Report the client version the index lists, alongside the running
- * one. Comparing them needs a rule for the app's version scheme, which
- * arrives with the notice that acts on the result.
+/* The newer version of this app the index lists, or NULL. Points into
+ * the held index, so it is recomputed whenever that is replaced.
  */
-static void report_client_version(void) {
+static const char *client_update;
+
+const char *online_check_get_client_update(void) {
+  return client_update;
+}
+
+/* Compare the app's own version against the index, reporting a newer
+ * release once rather than once per comparison.
+ */
+static void check_client_version(void) {
   static char *reported;
 
   struct online_update_index *idx = get_index();
 
-  if (!idx || !debug_enabled("update-check"))
+  client_update = NULL;
+
+  if (!idx)
     return;
 
   for (GList *l = idx->clients; l; l = l->next) {
@@ -251,6 +261,9 @@ static void report_client_version(void) {
     if (g_strcmp0(client->name, "alsa-scarlett-gui") != 0)
       continue;
 
+    if (online_client_version_cmp(client->version, VERSION) > 0)
+      client_update = client->version;
+
     // A fetch reporting what the cache already did says nothing new
     if (g_strcmp0(reported, client->version) == 0)
       return;
@@ -258,12 +271,23 @@ static void report_client_version(void) {
     g_free(reported);
     reported = g_strdup(client->version);
 
-    fprintf(
-      stderr, "Update check: index lists alsa-scarlett-gui %s, running %s\n",
-      client->version, VERSION
-    );
+    if (client_update)
+      fprintf(
+        stderr, "Update check: alsa-scarlett-gui %s available, running %s\n",
+        client->version, VERSION
+      );
+    else if (debug_enabled("update-check"))
+      fprintf(
+        stderr,
+        "Update check: alsa-scarlett-gui is up to date at %s "
+        "(index lists %s)\n",
+        VERSION, client->version
+      );
     return;
   }
+
+  if (debug_enabled("update-check"))
+    fprintf(stderr, "Update check: index lists no alsa-scarlett-gui\n");
 }
 
 /* Adopt a freshly fetched index. The cards are recomputed before the
@@ -284,8 +308,16 @@ static void index_fetched(
   held_index = fetched;
   index_load_attempted = TRUE;
 
-  report_client_version();
+  const char *was = client_update;
+
+  check_client_version();
   recompare_all_cards();
+
+  /* A new app version alone changes no card's status, so nothing above
+   * has notified about it.
+   */
+  if (g_strcmp0(was, client_update) != 0)
+    status_changed(NULL);
 
   online_update_index_free(previous);
 }
@@ -294,7 +326,7 @@ void online_check_start(void) {
   if (!app_settings_get_check_online_updates())
     return;
 
-  report_client_version();
+  check_client_version();
 
   if (!online_update_check_is_due()) {
     if (debug_enabled("update-check"))

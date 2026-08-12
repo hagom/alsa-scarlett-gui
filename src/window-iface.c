@@ -17,6 +17,7 @@
 #include "online-check.h"
 #include "routing-lines.h"
 #include "scarlett4-firmware.h"
+#include "update-notice.h"
 #include "window-iface.h"
 #include "window-mixer.h"
 #include "window-routing.h"
@@ -184,6 +185,7 @@ static void create_card_window(struct alsa_card *card) {
 
   int has_configuration = true;
   int has_mixer = true;
+  int is_update_iface = false;
 
   // Check if the FCP driver is not initialised yet
   if (card->driver_type == DRIVER_TYPE_SOCKET_UNINIT) {
@@ -244,13 +246,15 @@ static void create_card_window(struct alsa_card *card) {
    * available and the device is being rebooted anyway, since updating
    * clears MSD mode. A working device is otherwise left alone whatever
    * its driver, the update notice offering the update without insisting
-   * on it.
+   * on it — and taking over here is what makes that notice redundant, so
+   * it is left off.
    */
   if (firmware_version < min_firmware_version || mid_upgrade ||
       (update_available && in_msd_mode)) {
     card->window_main_contents = create_iface_update_main(card);
     has_configuration = false;
     has_mixer = false;
+    is_update_iface = true;
 
   // Scarlett Gen 1
   } else if (get_elem_by_prefix(card->elems, "Matrix")) {
@@ -311,7 +315,29 @@ static void create_card_window(struct alsa_card *card) {
   // are cancelled when the pointer leaves it)
   GtkWidget *overlay = gtk_overlay_new();
   gtk_overlay_set_child(GTK_OVERLAY(overlay), card->window_main_contents);
-  gtk_window_set_child(GTK_WINDOW(card->window_main), overlay);
+
+  /* The notice sits above the interface, except on the update interface,
+   * which already says an update is available and carries its own button.
+   */
+  GtkWidget *notice =
+    is_update_iface ? NULL : create_update_notice(card);
+
+  if (notice) {
+
+    /* The box carries the window background, since the interface's own
+     * frame paints only behind itself.
+     */
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
+    gtk_widget_add_css_class(box, "window-frame");
+    gtk_widget_add_css_class(box, "notice-holder");
+
+    gtk_box_append(GTK_BOX(box), notice);
+    gtk_box_append(GTK_BOX(box), overlay);
+    gtk_window_set_child(GTK_WINDOW(card->window_main), box);
+  } else {
+    gtk_window_set_child(GTK_WINDOW(card->window_main), overlay);
+  }
 
   // register callback to update window titles when name changes
   struct alsa_elem *name_elem = optional_controls_get_name_elem(card);
