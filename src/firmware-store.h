@@ -27,6 +27,14 @@ void firmware_store_add(
   char                     *fn
 );
 
+/* Discard every entry, so that firmware_enum_all() can be run again to
+ * pick up a newly downloaded file.
+ *
+ * Invalidates every pointer previously returned by this store. Callers
+ * holding one must re-ask after the re-enumeration that follows.
+ */
+void firmware_store_reset(void);
+
 /* The best known version, or NULL if none.
  *
  * The returned pointer is owned by the store and is valid only while

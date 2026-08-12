@@ -36,6 +36,21 @@ static struct firmware_entry *find_entry(
   return NULL;
 }
 
+void firmware_store_reset(void) {
+  if (!entries)
+    return;
+
+  for (guint i = 0; i < entries->len; i++) {
+    struct firmware_entry *entry = g_ptr_array_index(entries, i);
+
+    g_free(entry->fn);
+    g_free(entry);
+  }
+
+  g_ptr_array_free(entries, TRUE);
+  entries = NULL;
+}
+
 void firmware_store_add(
   enum firmware_generation  generation,
   uint32_t                  pid,
