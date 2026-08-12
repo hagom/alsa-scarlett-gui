@@ -492,10 +492,6 @@ void scarlett4_store_firmware(char *fn) {
   scarlett4_free_firmware_container(container);
 }
 
-const uint32_t *scarlett4_get_best_firmware_version(uint32_t pid) {
-  return firmware_store_get_version(FIRMWARE_GENERATION_SCARLETT4, pid);
-}
-
 struct scarlett4_firmware_container *scarlett4_get_best_firmware(uint32_t pid) {
   const char *fn = firmware_store_get_filename(
     FIRMWARE_GENERATION_SCARLETT4, pid

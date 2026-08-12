@@ -5,6 +5,7 @@
 
 #include "alsa.h"
 #include "device-update-firmware.h"
+#include "firmware-store.h"
 #include "gtkhelper.h"
 #include "scarlett2-firmware.h"
 #include "scarlett4-firmware.h"
@@ -43,8 +44,7 @@ GtkWidget *create_iface_update_main(struct alsa_card *card) {
   GtkWidget *w;
 
   // Check if we have firmware available for this device
-  int has_firmware = card->best_firmware_version ||
-                     card->best_firmware_version_4;
+  int has_firmware = card_best_local_firmware(card) != NULL;
 
   // Check if we're in mid-upgrade state
   int mid_upgrade = card->driver_type == DRIVER_TYPE_SOCKET &&

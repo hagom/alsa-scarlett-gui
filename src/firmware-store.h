@@ -44,3 +44,38 @@ const char *firmware_store_get_filename(
   enum firmware_generation generation,
   uint32_t                 pid
 );
+
+/* Which generation's firmware files belong to a card. Socket cards are
+ * scarlett4; every other card is scarlett2.
+ */
+enum firmware_generation card_firmware_generation(struct alsa_card *card);
+
+/* The best firmware version held for a card, from any of the
+ * directories walked, or NULL if none. Ownership and lifetime are those
+ * of firmware_store_get_version().
+ */
+const uint32_t *card_best_local_firmware(struct alsa_card *card);
+
+/* The firmware version a card reports running, written to parts as
+ * FIRMWARE_VERSION_PARTS components so that it compares against a held
+ * version. Reads the "Firmware Version" control, which carries a single
+ * component for the scarlett2 era and four for scarlett4.
+ *
+ * Returns 0, leaving parts untouched, when the card reports no version.
+ */
+int card_running_firmware_version(struct alsa_card *card, uint32_t *parts);
+
+/* Whether a card has firmware held locally that is newer than the
+ * version it is running, which is what makes an update installable
+ * without downloading anything.
+ */
+gboolean card_firmware_update_available(struct alsa_card *card);
+
+/* A held firmware version as text, formatted the way a device of that
+ * card's generation reports its own: a single number for the scarlett2
+ * era, four dotted components for scarlett4. Free with g_free().
+ */
+char *card_format_firmware_version(
+  struct alsa_card *card,
+  const uint32_t   *version
+);

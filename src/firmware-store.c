@@ -90,3 +90,62 @@ const char *firmware_store_get_filename(
 
   return entry ? entry->fn : NULL;
 }
+
+enum firmware_generation card_firmware_generation(struct alsa_card *card) {
+  return card->driver_type == DRIVER_TYPE_SOCKET ?
+    FIRMWARE_GENERATION_SCARLETT4 : FIRMWARE_GENERATION_SCARLETT2;
+}
+
+const uint32_t *card_best_local_firmware(struct alsa_card *card) {
+  return firmware_store_get_version(
+    card_firmware_generation(card), card->pid
+  );
+}
+
+int card_running_firmware_version(struct alsa_card *card, uint32_t *parts) {
+  struct alsa_elem *elem = get_elem_by_name(card->elems, "Firmware Version");
+
+  if (!elem)
+    return 0;
+
+  /* A scarlett2-era device reports one component; the store holds it in
+   * element 0 with the remainder zero, so a single-component version
+   * compares against a held one directly.
+   */
+  if (elem->count == 1) {
+    memset(parts, 0, FIRMWARE_VERSION_PARTS * sizeof(*parts));
+    parts[0] = alsa_get_elem_value(elem);
+    return 1;
+  }
+
+  return firmware_version_from_elem(elem, parts);
+}
+
+gboolean card_firmware_update_available(struct alsa_card *card) {
+  const uint32_t *best = card_best_local_firmware(card);
+
+  if (!best)
+    return FALSE;
+
+  uint32_t running[FIRMWARE_VERSION_PARTS];
+
+  if (!card_running_firmware_version(card, running))
+    return FALSE;
+
+  return firmware_version_cmp(best, running) > 0;
+}
+
+char *card_format_firmware_version(
+  struct alsa_card *card,
+  const uint32_t   *version
+) {
+  if (card_firmware_generation(card) == FIRMWARE_GENERATION_SCARLETT2)
+    return g_strdup_printf("%u", version[0]);
+
+  GString *s = g_string_new(NULL);
+
+  for (int i = 0; i < FIRMWARE_VERSION_PARTS; i++)
+    g_string_append_printf(s, i ? ".%u" : "%u", version[i]);
+
+  return g_string_free(s, FALSE);
+}

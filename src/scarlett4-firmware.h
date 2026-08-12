@@ -92,12 +92,6 @@ const char *scarlett4_firmware_type_to_string(enum scarlett4_firmware_type type)
 /* Record a firmware file in the firmware store; takes ownership of fn */
 void scarlett4_store_firmware(char *fn);
 
-/* Get the best firmware version for a device (4-valued), or NULL if
- * none. Owned by the firmware store and valid only while the store
- * holds that entry.
- */
-const uint32_t *scarlett4_get_best_firmware_version(uint32_t pid);
-
 /* Get the best firmware container for a device, or NULL if none */
 struct scarlett4_firmware_container *scarlett4_get_best_firmware(uint32_t pid);
 

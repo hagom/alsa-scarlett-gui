@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "config-display.h"
+#include "firmware-store.h"
 #include "iface-mixer.h"
 #include "iface-no-mixer.h"
 #include "iface-none.h"
@@ -223,29 +224,29 @@ static void create_card_window(struct alsa_card *card) {
     min_firmware_version = alsa_get_elem_value(min_firmware_elem);
   }
 
-  // Check if FCP/Scarlett4 device needs firmware update
-  int fcp_needs_update = 0;
-  if (card->driver_type == DRIVER_TYPE_SOCKET &&
-      card->best_firmware_version_4) {
-    uint32_t current[FIRMWARE_VERSION_PARTS];
+  int update_available = card_firmware_update_available(card);
 
-    fcp_needs_update =
-      firmware_version_from_elem(firmware_elem, current) &&
-      firmware_version_cmp(current, card->best_firmware_version_4) < 0;
-  }
+  /* A device part-way through an upgrade is running the leapfrog
+   * firmware, an intermediate version that is not below the minimum, so
+   * only this says it has an upgrade to finish.
+   */
+  int mid_upgrade = card->driver_type == DRIVER_TYPE_SOCKET &&
+                    scarlett4_is_mid_upgrade(card);
 
   // set has_levels flag and load display prefs before building UI
   card->has_levels =
     !!get_elem_by_name(card->elems, "Firmware Version");
   load_display_prefs(card);
 
-  // Firmware update required
-  // or firmware version available and in MSD mode
-  // (updating will disable MSD mode)
-  // or FCP device with newer firmware available
-  if (firmware_version < min_firmware_version ||
-      (card->best_firmware_version > firmware_version && in_msd_mode) ||
-      fcp_needs_update) {
+  /* Take over the window for a firmware update when it is required, when
+   * an upgrade is part-way through and needs finishing, or when one is
+   * available and the device is being rebooted anyway, since updating
+   * clears MSD mode. A working device is otherwise left alone whatever
+   * its driver, the update notice offering the update without insisting
+   * on it.
+   */
+  if (firmware_version < min_firmware_version || mid_upgrade ||
+      (update_available && in_msd_mode)) {
     card->window_main_contents = create_iface_update_main(card);
     has_configuration = false;
     has_mixer = false;

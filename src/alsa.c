@@ -1393,12 +1393,9 @@ static void complete_card_init(struct alsa_card *card) {
   port_enable_init(card);
   stereo_link_init(card);
   dsp_state_init(card);
-  card->best_firmware_version = scarlett2_get_best_firmware_version(card->pid);
 
-  // For FCP/scarlett4 devices, get the 4-valued best firmware version
-  // and read the current device firmware versions
+  // For FCP/scarlett4 devices, read the current device firmware versions
   if (card->driver_type == DRIVER_TYPE_SOCKET) {
-    card->best_firmware_version_4 = scarlett4_get_best_firmware_version(card->pid);
 
     // Read current device firmware version
     firmware_version_from_elem(

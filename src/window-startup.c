@@ -5,6 +5,7 @@
 #include "device-reset-config.h"
 #include "device-update-firmware.h"
 #include "fcp-socket.h"
+#include "firmware-store.h"
 #include "gtkhelper.h"
 #include "scarlett2.h"
 #include "scarlett2-ioctls.h"
@@ -336,48 +337,26 @@ static void add_reset_actions(
     G_CALLBACK(create_reset_config_window)
   );
 
-  // Update Firmware
-  struct alsa_elem *firmware_elem =
-    get_elem_by_name(card->elems, "Firmware Version");
-
-  if (!firmware_elem)
+  // Update Firmware, offered only when a newer file is held locally
+  if (!card_firmware_update_available(card))
     return;
 
-  char *s;
+  uint32_t running[FIRMWARE_VERSION_PARTS];
 
-  // FCP/Scarlett4 devices use 4-valued firmware versions
-  if (card->driver_type == DRIVER_TYPE_SOCKET && card->best_firmware_version_4) {
-    uint32_t current[FIRMWARE_VERSION_PARTS];
+  card_running_firmware_version(card, running);
 
-    if (!firmware_version_from_elem(firmware_elem, current))
-      return;
+  char *from = card_format_firmware_version(card, running);
+  char *to = card_format_firmware_version(card, card_best_local_firmware(card));
 
-    if (firmware_version_cmp(current, card->best_firmware_version_4) >= 0)
-      return;
+  char *s = g_strdup_printf(
+    "Updating the firmware will reset the interface to its "
+    "factory default settings and update the firmware from version "
+    "%s to %s.",
+    from, to
+  );
 
-    s = g_strdup_printf(
-      "Updating the firmware will reset the interface to its "
-      "factory default settings and update the firmware from version "
-      "%u.%u.%u.%u to %u.%u.%u.%u.",
-      current[0], current[1], current[2], current[3],
-      card->best_firmware_version_4[0], card->best_firmware_version_4[1],
-      card->best_firmware_version_4[2], card->best_firmware_version_4[3]
-    );
-  } else {
-    // Scarlett2 devices use single-valued firmware versions
-    int firmware_version = alsa_get_elem_value(firmware_elem);
-
-    if (firmware_version >= card->best_firmware_version)
-      return;
-
-    s = g_strdup_printf(
-      "Updating the firmware will reset the interface to its "
-      "factory default settings and update the firmware from version "
-      "%d to %d.",
-      firmware_version,
-      card->best_firmware_version
-    );
-  }
+  g_free(from);
+  g_free(to);
 
   add_reset_action(
     card,

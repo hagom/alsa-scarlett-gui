@@ -167,14 +167,6 @@ void scarlett2_store_firmware(char *fn) {
   scarlett2_free_firmware_header(firmware);
 }
 
-uint32_t scarlett2_get_best_firmware_version(uint32_t pid) {
-  const uint32_t *version = firmware_store_get_version(
-    FIRMWARE_GENERATION_SCARLETT2, pid
-  );
-
-  return version ? version[0] : 0;
-}
-
 struct scarlett2_firmware_file *scarlett2_get_best_firmware(uint32_t pid) {
   const char *fn = firmware_store_get_filename(
     FIRMWARE_GENERATION_SCARLETT2, pid
