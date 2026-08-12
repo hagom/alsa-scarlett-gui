@@ -69,6 +69,51 @@ const struct card_update_status *online_check_get_status(
  */
 const char *online_check_get_client_update(void);
 
+/* How a card's automatic firmware download is getting on.
+ *
+ * A download starts as soon as a comparison finds firmware the index
+ * offers and this machine does not hold, so that a user who clicks
+ * Update usually finds it already there. Nothing is installed without
+ * being asked for; only the transfer is automatic.
+ *
+ * NONE covers both "nothing to download" and "the file is already
+ * held" — in the latter case the status reports have_local_file and
+ * there is nothing for a download to do.
+ */
+enum download_state {
+  DOWNLOAD_STATE_NONE,
+  DOWNLOAD_STATE_RUNNING,
+  DOWNLOAD_STATE_DONE,
+  DOWNLOAD_STATE_FAILED,
+  DOWNLOAD_STATE_BLOCKED  // requirements unmet; error says which
+};
+
+struct card_download {
+  enum download_state  state;
+  gsize                received;
+  gsize                total;     // 0 if not yet known
+  char                *error;     // FAILED or BLOCKED only
+};
+
+/* A card's download progress, or NULL if none has been considered for
+ * it. Valid until the next status or progress change, both of which the
+ * status changed callbacks report.
+ */
+const struct card_download *online_check_get_download(
+  struct alsa_card *card
+);
+
+/* Start the download for this card if it has not been started, or retry
+ * one that failed. Called when the user asks for the firmware and the
+ * automatic download is not already in hand; a running or finished
+ * download is left alone.
+ *
+ * Progress and completion are reported through the status changed
+ * callbacks, not through a callback of its own: more than one widget may
+ * be watching a download that nobody's click started.
+ */
+void online_check_start_download(struct alsa_card *card);
+
 /* Register interest in status changes, called with the card whose
  * status was computed or discarded, or NULL when a fetch changed the
  * app's own available version. A fetch completing recomputes every

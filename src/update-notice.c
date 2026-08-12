@@ -30,6 +30,15 @@ static char *firmware_markup(struct alsa_card *card) {
   if (!status || !status->available)
     return NULL;
 
+  const struct card_download *download = online_check_get_download(card);
+
+  if (download && download->state == DOWNLOAD_STATE_BLOCKED)
+    return g_markup_printf_escaped(
+      "Firmware %s is available for this device (running %s), "
+      "but cannot be installed: %s.",
+      status->offered_version, status->installed_version, download->error
+    );
+
   return g_markup_printf_escaped(
     "Firmware %s is available for this device (running %s).",
     status->offered_version, status->installed_version
@@ -57,8 +66,8 @@ static char *client_markup(void) {
 
 /* Whether the available firmware can be installed from here, which
  * needs it to be the local file rather than one only the index lists:
- * this button opens the existing update window, which installs from the
- * firmware store and does not download.
+ * the update window installs from the firmware store and does not
+ * download.
  */
 static gboolean can_install_now(struct alsa_card *card) {
   const struct card_update_status *status = online_check_get_status(card);
@@ -66,8 +75,32 @@ static gboolean can_install_now(struct alsa_card *card) {
   return status && status->available && status->have_local_file;
 }
 
+/* Whether to offer the button. Firmware that cannot be installed on this
+ * machine gets none: the row already says why, and a button that only
+ * repeated the reason would be a button that does nothing.
+ */
+static gboolean update_offered(struct alsa_card *card) {
+  const struct card_update_status *status = online_check_get_status(card);
+
+  if (!status || !status->available)
+    return FALSE;
+
+  const struct card_download *download = online_check_get_download(card);
+
+  return !download || download->state != DOWNLOAD_STATE_BLOCKED;
+}
+
 static void update_clicked(GtkWidget *w, struct alsa_card *card) {
-  create_update_firmware_window(w, card, NULL);
+  if (can_install_now(card)) {
+    create_update_firmware_window(w, card, NULL);
+    return;
+  }
+
+  /* The file is not here yet, so the click asks for the transfer: either
+   * the first attempt, or a retry of one that failed. A running download
+   * has the bar in this button's place, so there is no click to handle.
+   */
+  online_check_start_download(card);
 }
 
 /* One finding: a label, and room after it for the action that applies
@@ -105,6 +138,37 @@ static gboolean refresh_row(GtkWidget *row, char *markup) {
   return TRUE;
 }
 
+/* Show the download in the firmware row while one is running, so that a
+ * user who clicks Update before the file has arrived can see what it is
+ * waiting for rather than an unresponsive button.
+ */
+// Returns whether the download is running, and so the bar is showing
+static gboolean refresh_progress(GtkWidget *progress, struct alsa_card *card) {
+  const struct card_download *download = online_check_get_download(card);
+  gboolean running =
+    download && download->state == DOWNLOAD_STATE_RUNNING;
+
+  gtk_widget_set_visible(progress, running);
+
+  if (!running)
+    return FALSE;
+
+  /* Before the first chunk, and if a server sends no length, there is no
+   * fraction to show; pulse rather than sit at zero.
+   */
+  if (!download->total) {
+    gtk_progress_bar_pulse(GTK_PROGRESS_BAR(progress));
+    return TRUE;
+  }
+
+  gtk_progress_bar_set_fraction(
+    GTK_PROGRESS_BAR(progress),
+    (double)download->received / download->total
+  );
+
+  return TRUE;
+}
+
 /* Update both rows, hiding the notice when neither has anything to
  * report.
  */
@@ -113,11 +177,18 @@ static void refresh_notice(GtkWidget *notice) {
   GtkWidget *firmware_row = g_object_get_data(G_OBJECT(notice), "firmware-row");
   GtkWidget *client_row = g_object_get_data(G_OBJECT(notice), "client-row");
   GtkWidget *button = g_object_get_data(G_OBJECT(notice), "button");
+  GtkWidget *progress = g_object_get_data(G_OBJECT(notice), "progress");
 
   gboolean any = refresh_row(firmware_row, firmware_markup(card));
 
-  // The button belongs to the firmware row, so it goes when that goes
-  gtk_widget_set_visible(button, can_install_now(card));
+  /* The bar takes the button's place while the download runs, rather
+   * than sitting beside it: the button does nothing until the file has
+   * arrived, and one that cannot be clicked should not be there to
+   * click. Both belong to the firmware row, so both go when it goes.
+   */
+  gboolean downloading = refresh_progress(progress, card);
+
+  gtk_widget_set_visible(button, !downloading && update_offered(card));
 
   if (refresh_row(client_row, client_markup()))
     any = TRUE;
@@ -169,10 +240,20 @@ GtkWidget *create_update_notice(struct alsa_card *card) {
   g_signal_connect(button, "clicked", G_CALLBACK(update_clicked), card);
   gtk_box_append(GTK_BOX(firmware_row), button);
 
+  /* Occupies the button's place while the download runs, so the CSS
+   * gives it the button's width: the row is then the same size either
+   * way, and neither sets the window's width.
+   */
+  GtkWidget *progress = gtk_progress_bar_new();
+  gtk_widget_set_valign(progress, GTK_ALIGN_CENTER);
+  gtk_widget_add_css_class(progress, "update-progress");
+  gtk_box_append(GTK_BOX(firmware_row), progress);
+
   g_object_set_data(G_OBJECT(notice), "card", card);
   g_object_set_data(G_OBJECT(notice), "firmware-row", firmware_row);
   g_object_set_data(G_OBJECT(notice), "client-row", client_row);
   g_object_set_data(G_OBJECT(notice), "button", button);
+  g_object_set_data(G_OBJECT(notice), "progress", progress);
 
   notices = g_slist_prepend(notices, notice);
   g_object_weak_ref(G_OBJECT(notice), notice_finalised, NULL);

@@ -777,6 +777,16 @@ button.toggle {
   padding: 2px 10px;
 }
 
+/* Stands in for the Update button while the download runs, so it is
+ * sized to leave the row the width the button gives it. The width goes
+ * on the trough, which is what the theme sizes the bar from; its own
+ * default is 152px, which made the notice wider than its text. The
+ * height is left alone, the theme's 4px already being a slim bar.
+ */
+.update-notice .update-progress trough {
+  min-width: 55px;
+}
+
 /* Incidental text: present, but not competing with the question */
 .consent-aside {
   opacity: 0.7;

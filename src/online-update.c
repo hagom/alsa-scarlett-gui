@@ -777,6 +777,14 @@ typedef void (*request_progress_cb)(
 // How much of the body to ask for at a time when streaming
 #define READ_CHUNK_SIZE (64 * 1024)
 
+/* Define SLOW_DOWNLOAD to throttle firmware downloads to these figures,
+ * which is the only way to watch the progress bar do anything: a
+ * firmware file arrives in well under a second otherwise.
+ */
+//#define SLOW_DOWNLOAD
+#define SLOW_DOWNLOAD_CHUNK_SIZE (4 * 1024)
+#define SLOW_DOWNLOAD_DELAY_MS 150
+
 /* A GET request whose body is read into memory. done() is called
  * exactly once; either way the request is freed afterwards.
  *
@@ -921,7 +929,30 @@ static void request_chunk_read(
   request_read_chunk(req);
 }
 
+#ifdef SLOW_DOWNLOAD
+
+// Wait between chunks; only downloads asking for progress are slowed
+static gboolean slow_read_chunk(gpointer user_data) {
+  struct request *req = user_data;
+
+  g_input_stream_read_bytes_async(
+    req->stream, SLOW_DOWNLOAD_CHUNK_SIZE, G_PRIORITY_DEFAULT,
+    req->cancellable, request_chunk_read, req
+  );
+
+  return G_SOURCE_REMOVE;
+}
+
+#endif // SLOW_DOWNLOAD
+
 static void request_read_chunk(struct request *req) {
+#ifdef SLOW_DOWNLOAD
+  if (req->progress) {
+    g_timeout_add(SLOW_DOWNLOAD_DELAY_MS, slow_read_chunk, req);
+    return;
+  }
+#endif
+
   g_input_stream_read_bytes_async(
     req->stream, READ_CHUNK_SIZE, G_PRIORITY_DEFAULT, req->cancellable,
     request_chunk_read, req

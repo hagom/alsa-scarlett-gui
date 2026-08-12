@@ -25,6 +25,7 @@ struct monitor_group_elems {
 struct alsa_elem;
 struct alsa_card;
 struct card_update_status;
+struct card_download;
 
 // typedef for callbacks to update widgets when the alsa element
 // notifies of a change
@@ -285,6 +286,9 @@ struct alsa_card {
 
   // what the online index offers this card, owned by online-check.c
   struct card_update_status *update_status;
+
+  // how its automatic firmware download is getting on, likewise
+  struct card_download *download;
   snd_ctl_t          *handle;
   struct pollfd       pfd;
   GPtrArray          *elems;

@@ -9,6 +9,7 @@
 #include "alsa.h"
 #include "app-settings.h"
 #include "debug.h"
+#include "firmware-dir.h"
 #include "firmware-probe.h"
 #include "firmware-store.h"
 #include "online-check.h"
@@ -194,34 +195,79 @@ static void update_status(struct alsa_card *card) {
   status_changed(card);
 }
 
-void online_check_card_ready(struct alsa_card *card) {
-  if (!card_is_comparable(card))
-    return;
-
-  /* Not gated on check-online-updates: a firmware file already on this
-   * machine is worth reporting with the network never touched. The
-   * setting gates the index, in compute_status().
-   */
-  update_status(card);
-}
-
-void online_check_card_gone(struct alsa_card *card) {
-  if (!card->update_status)
-    return;
-
-  free_status(card->update_status);
-  card->update_status = NULL;
-
-  status_changed(card);
-}
-
 const struct card_update_status *online_check_get_status(
   struct alsa_card *card
 ) {
   return card->update_status;
 }
 
-// Recompute every connected card against the index now held
+/* A download in flight, which outlives the card it is for: there is no
+ * way to cancel the request, so the completion checks whether the card
+ * is still connected rather than trusting the pointer.
+ */
+struct download_request {
+  struct alsa_card *card;
+};
+
+static GSList *downloads;
+
+// Whether this card is still in the card list
+static gboolean card_still_present(struct alsa_card *card) {
+  GArray *cards = alsa_get_cards();
+
+  for (guint i = 0; cards && i < cards->len; i++)
+    if (g_array_index(cards, struct alsa_card *, i) == card)
+      return TRUE;
+
+  return FALSE;
+}
+
+const struct card_download *online_check_get_download(
+  struct alsa_card *card
+) {
+  return card->download;
+}
+
+static void free_download(struct card_download *download) {
+  if (!download)
+    return;
+
+  g_free(download->error);
+  g_free(download);
+}
+
+/* The download record for a card, created on first use. A card that has
+ * never had firmware to fetch has none at all, which reads as "not
+ * considered".
+ */
+static struct card_download *get_download(struct alsa_card *card) {
+  if (!card->download)
+    card->download = g_malloc0(sizeof(*card->download));
+
+  return card->download;
+}
+
+static void set_download_error(
+  struct alsa_card    *card,
+  enum download_state  state,
+  char                *error
+) {
+  struct card_download *download = get_download(card);
+
+  download->state = state;
+  g_free(download->error);
+  download->error = error;
+
+  status_changed(card);
+}
+
+/* Recompute every connected card's status.
+ *
+ * Whether any of them should start a download is a separate question,
+ * asked by the callers that can answer it: a fetch that replaced the
+ * index can offer firmware nobody has, while a download completing only
+ * ever makes a card's own file local.
+ */
 static void recompare_all_cards(void) {
   GArray *cards = alsa_get_cards();
 
@@ -231,6 +277,229 @@ static void recompare_all_cards(void) {
     if (card_is_comparable(card))
       update_status(card);
   }
+}
+
+/* Pick up a downloaded file: the store keys on the best version per
+ * device, so a new file is adopted by discarding the store and walking
+ * every directory again rather than by adding the one file. That keeps
+ * one code path deciding which firmware is best.
+ *
+ * No download is considered afterwards: the file that just arrived makes
+ * its own card's status local, and no other card's offering has changed.
+ */
+static void reenumerate_firmware(void) {
+  firmware_store_reset();
+  firmware_enum_all();
+  recompare_all_cards();
+}
+
+static void download_progress(gsize received, gsize total, gpointer user_data) {
+  struct download_request *req = user_data;
+
+  if (!card_still_present(req->card))
+    return;
+
+  struct card_download *download = get_download(req->card);
+
+  download->received = received;
+  download->total = total;
+
+  status_changed(req->card);
+}
+
+static void download_finished(
+  const char *fn,
+  const char *error,
+  gpointer    user_data
+) {
+  struct download_request *req = user_data;
+  struct alsa_card *card = req->card;
+
+  downloads = g_slist_remove(downloads, req);
+  g_free(req);
+
+  if (error)
+    fprintf(stderr, "Update check: download failed: %s\n", error);
+  else if (debug_enabled("update-check"))
+    fprintf(stderr, "Update check: downloaded %s\n", fn);
+
+  /* Re-enumerate regardless of whether the card is still here: the file
+   * is on disk and belongs in the store for whatever asks next.
+   */
+  if (!error)
+    reenumerate_firmware();
+
+  if (!card_still_present(card))
+    return;
+
+  if (error) {
+    set_download_error(card, DOWNLOAD_STATE_FAILED, g_strdup(error));
+    return;
+  }
+
+  /* reenumerate_firmware() has already recomputed and reported this
+   * card's status, which now says have_local_file.
+   */
+  struct card_download *download = get_download(card);
+
+  download->state = DOWNLOAD_STATE_DONE;
+  download->received = download->total;
+
+  status_changed(card);
+}
+
+/* Begin the transfer, having established that there is something to
+ * transfer and that this machine can install it.
+ */
+static void begin_download(
+  struct alsa_card                *card,
+  const struct card_update_status *status
+) {
+  struct download_request *req = g_malloc0(sizeof(*req));
+
+  req->card = card;
+
+  downloads = g_slist_prepend(downloads, req);
+
+  struct card_download *download = get_download(card);
+
+  download->state = DOWNLOAD_STATE_RUNNING;
+  download->received = 0;
+  download->total = status->firmware->size;
+  g_clear_pointer(&download->error, g_free);
+
+  if (debug_enabled("update-check"))
+    fprintf(
+      stderr, "Update check: downloading firmware %s for %04x (%s)\n",
+      status->firmware->version, card->pid, card->name
+    );
+
+  status_changed(card);
+
+  online_update_download(
+    status->firmware, download_finished, req, download_progress
+  );
+}
+
+/* Consider downloading the firmware the index offers for this card.
+ * Called after every comparison, so it must be idempotent: a download
+ * already running, already done, or already known to be blocked is left
+ * as it is.
+ *
+ * retry restarts a failed download, which is what a user clicking
+ * Update after a failure is asking for. Without it a failure stands
+ * until the next launch, since a recomputed status calls this again.
+ */
+static void consider_download(struct alsa_card *card, gboolean retry) {
+  const struct card_update_status *status = online_check_get_status(card);
+
+  // Nothing offered, or the file is already here
+  if (!status || !status->available || status->have_local_file ||
+      !status->firmware) {
+    if (card->download)
+      card->download->state = DOWNLOAD_STATE_NONE;
+    return;
+  }
+
+  struct card_download *download = card->download;
+
+  if (download)
+    switch (download->state) {
+      case DOWNLOAD_STATE_RUNNING:
+      case DOWNLOAD_STATE_DONE:
+        return;
+      case DOWNLOAD_STATE_FAILED:
+        if (!retry)
+          return;
+        break;
+      case DOWNLOAD_STATE_NONE:
+      case DOWNLOAD_STATE_BLOCKED:
+        break;
+    }
+
+  /* Already on disk from an earlier run, so there is nothing to fetch
+   * even though the status still asks for a download.
+   *
+   * That combination is reachable: the file the index points at may hold
+   * a version other than the one the index claims, or one no newer than
+   * the device already runs, in which case it never becomes the best
+   * version and the status keeps asking. Without this the same firmware
+   * would be downloaded again on every launch.
+   *
+   * A user clicking Update still gets a retry, which is the way to
+   * replace a file that arrived corrupt.
+   */
+  if (!retry && online_update_already_downloaded(status->firmware)) {
+    if (debug_enabled("update-check"))
+      fprintf(
+        stderr,
+        "Update check: firmware %s for %04x (%s) is already downloaded "
+        "but is not the best version available; not fetching it again\n",
+        status->firmware->version, card->pid, card->name
+      );
+
+    struct card_download *d = get_download(card);
+
+    d->state = DOWNLOAD_STATE_DONE;
+    d->received = d->total = status->firmware->size;
+    return;
+  }
+
+  /* Requirements are checked before the transfer rather than before the
+   * install: fetching firmware this machine cannot install wastes the
+   * transfer and leaves a file in the cache that every later comparison
+   * would offer as though it were installable.
+   */
+  char *fcp_version = card_fcp_server_version(card);
+  char *requirement =
+    online_firmware_requirement_error(status->firmware, fcp_version);
+
+  g_free(fcp_version);
+
+  if (requirement) {
+    // Say so once, not on every recomparison
+    if (!download || download->state != DOWNLOAD_STATE_BLOCKED) {
+      fprintf(
+        stderr, "Update check: %04x (%s) cannot install firmware %s: %s\n",
+        card->pid, card->name, status->firmware->version, requirement
+      );
+      set_download_error(card, DOWNLOAD_STATE_BLOCKED, requirement);
+    } else {
+      g_free(requirement);
+    }
+    return;
+  }
+
+  begin_download(card, status);
+}
+
+void online_check_start_download(struct alsa_card *card) {
+  consider_download(card, TRUE);
+}
+
+void online_check_card_ready(struct alsa_card *card) {
+  if (!card_is_comparable(card))
+    return;
+
+  /* Not gated on check-online-updates: a firmware file already on this
+   * machine is worth reporting with the network never touched. The
+   * setting gates the index, in compute_status().
+   */
+  update_status(card);
+  consider_download(card, FALSE);
+}
+
+void online_check_card_gone(struct alsa_card *card) {
+  free_download(card->download);
+  card->download = NULL;
+
+  if (!card->update_status)
+    return;
+
+  free_status(card->update_status);
+  card->update_status = NULL;
+
+  status_changed(card);
 }
 
 /* The newer version of this app the index lists, or NULL. Points into
@@ -312,6 +581,19 @@ static void index_fetched(
 
   check_client_version();
   recompare_all_cards();
+
+  /* A fresh index can offer firmware no card holds, which is the case
+   * automatic downloading exists for. Considered after every status is
+   * recomputed, so each decision reads a current one.
+   */
+  GArray *cards = alsa_get_cards();
+
+  for (guint i = 0; cards && i < cards->len; i++) {
+    struct alsa_card *card = g_array_index(cards, struct alsa_card *, i);
+
+    if (card_is_comparable(card))
+      consider_download(card, FALSE);
+  }
 
   /* A new app version alone changes no card's status, so nothing above
    * has notified about it.
