@@ -3,6 +3,9 @@
 
 #ifdef HAVE_ONLINE_UPDATE
 
+// for strverscmp(), which orders "beta2" before "beta10"
+#define _GNU_SOURCE
+
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -135,6 +138,99 @@ int online_parse_version(const char *version, uint32_t *parts) {
   return parse_version_parts(
     version, parts, FIRMWARE_VERSION_PARTS, NULL
   );
+}
+
+// Step over any further dotted numeric components
+static const char *skip_version_parts(const char *p) {
+  while (g_ascii_isdigit(*p)) {
+    while (g_ascii_isdigit(*p))
+      p++;
+
+    if (*p != '.' || !g_ascii_isdigit(p[1]))
+      break;
+
+    p++;
+  }
+
+  return p;
+}
+
+/* Split what follows the numeric base into the pre-release tag and the
+ * git-describe commit count. They rank in opposite directions: "beta9"
+ * is older than the release it precedes, while "-55-g695e6c6" is 55
+ * commits newer than the version it describes.
+ *
+ * Returns the tag, with commits_out receiving the count (0 when there
+ * is none). Free the tag with g_free().
+ */
+static char *split_version_suffix(const char *suffix, guint64 *commits_out) {
+  *commits_out = 0;
+
+  /* git describe appends "-<count>-g<hash>". The last dash starts the
+   * hash, so the count runs back from the dash before it, and whatever
+   * precedes that is the tag.
+   */
+  const char *hash = strrchr(suffix, '-');
+
+  if (!hash || hash[1] != 'g' || hash == suffix)
+    return g_strdup(suffix);
+
+  const char *count = hash - 1;
+
+  while (count > suffix && g_ascii_isdigit(count[-1]))
+    count--;
+
+  if (count == hash || count[-1] != '-')
+    return g_strdup(suffix);
+
+  *commits_out = g_ascii_strtoull(count, NULL, 10);
+
+  return g_strndup(suffix, count - 1 - suffix);
+}
+
+int online_client_version_cmp(const char *a, const char *b) {
+  uint32_t a_parts[FIRMWARE_VERSION_PARTS];
+  uint32_t b_parts[FIRMWARE_VERSION_PARTS];
+  const char *a_rest, *b_rest;
+
+  parse_version_parts(a, a_parts, FIRMWARE_VERSION_PARTS, &a_rest);
+  parse_version_parts(b, b_parts, FIRMWARE_VERSION_PARTS, &b_rest);
+
+  /* Numeric components past the fourth belong to the base. Left in
+   * place they would look like a tag, making a longer version compare
+   * as a pre-release of the prefix just compared. The parse stops
+   * having consumed the separating dot, so the first of them is reached
+   * directly.
+   */
+  a_rest = skip_version_parts(a_rest);
+  b_rest = skip_version_parts(b_rest);
+
+  int cmp = firmware_version_cmp(a_parts, b_parts);
+
+  if (cmp)
+    return cmp;
+
+  guint64 a_commits, b_commits;
+  char *a_tag = split_version_suffix(a_rest, &a_commits);
+  char *b_tag = split_version_suffix(b_rest, &b_commits);
+
+  // No tag means a release, which is newer than a pre-release of it
+  if (!*a_tag != !*b_tag)
+    cmp = *a_tag ? -1 : 1;
+  else
+    cmp = strverscmp(a_tag, b_tag);
+
+  g_free(a_tag);
+  g_free(b_tag);
+
+  if (cmp)
+    return cmp;
+
+  // Same tag, so compare the commits since it
+  if (a_commits != b_commits)
+    return a_commits < b_commits ? -1 : 1;
+
+  return 0;
 }
 
 /* Parse a version that must be nothing but dotted decimals, such as

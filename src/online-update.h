@@ -156,6 +156,22 @@ void online_update_index_free(struct online_update_index *index);
  */
 int online_parse_version(const char *version, uint32_t *parts);
 
+/* Compare two of this app's version strings, e.g. "1.0", "1.0beta9",
+ * "1.0beta9-55-g695e6c6". Returns <0, 0 or >0 like strcmp().
+ *
+ * A version is a dotted numeric base, an optional pre-release tag, and
+ * an optional git-describe "-<commits>-g<hash>", compared in that
+ * order:
+ *
+ *   1.0 > 1.0beta9              a tagged version precedes its release
+ *   1.0beta10 > 1.0beta9        tags by strverscmp()
+ *   1.0beta9-55-g695 > 1.0beta9 commits count forward from the tag
+ *
+ * A tag is taken to always mean pre-release, which is what this
+ * project's versioning scheme means by one.
+ */
+int online_client_version_cmp(const char *a, const char *b);
+
 /* Returns NULL if the running kernel and fcp-server meet the
  * firmware's requirements, otherwise a newly allocated message
  * explaining the unmet requirement. fcp_server_version may be NULL
