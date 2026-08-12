@@ -322,6 +322,31 @@ char *card_firmware_version(struct alsa_card *card) {
   return g_string_free(version, FALSE);
 }
 
+/* The version of the fcp-server this card is served by, or NULL if it
+ * reports none. Free with g_free().
+ *
+ * Reads the "FCP Server Version" control, a NUL-terminated string in a
+ * fixed-size BYTES control, published verbatim including any
+ * git-describe suffix. Only socket cards have one; a socket card
+ * without one is served by a server predating the control.
+ */
+char *card_fcp_server_version(struct alsa_card *card) {
+  struct alsa_elem *elem =
+    get_elem_by_name(card->elems, "FCP Server Version");
+
+  if (!elem)
+    return NULL;
+
+  size_t size = 0;
+  const char *bytes = alsa_get_elem_bytes(elem, &size);
+
+  if (!bytes || !size)
+    return NULL;
+
+  // Not NUL-terminated if the server filled the control completely
+  return g_strndup(bytes, size);
+}
+
 // set multiple int values for an element (e.g., biquad coefficients)
 void alsa_set_elem_int_values(
   struct alsa_elem *elem, const long *values, int count

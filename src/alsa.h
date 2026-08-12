@@ -446,6 +446,9 @@ void alsa_set_elem_bytes(struct alsa_elem *elem, const void *data, size_t size);
  */
 char *card_firmware_version(struct alsa_card *card);
 
+// The fcp-server version serving a card, or NULL. Free with g_free().
+char *card_fcp_server_version(struct alsa_card *card);
+
 // create simulated optional element
 struct alsa_elem *alsa_create_optional_elem(
   struct alsa_card *card,
