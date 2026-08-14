@@ -9,15 +9,19 @@ TESTS = test-biquad
 # they are only built when it is enabled
 ONLINE_UPDATE ?= 1
 ifeq ($(ONLINE_UPDATE),1)
-  TESTS += test-index-cache test-client-version
+  TESTS += test-index-cache test-client-version test-requirements
 endif
 
 CFLAGS = -I.. -Wall $(shell $(PKG_CONFIG) --cflags glib-2.0)
 LDFLAGS = -lm $(shell $(PKG_CONFIG) --libs glib-2.0)
 
 ONLINE_PKGS = gtk4 alsa libsoup-3.0 json-glib-1.0
-ONLINE_CFLAGS = -DHAVE_ONLINE_UPDATE -DVERSION=\"test\" \
+ONLINE_CFLAGS = -DHAVE_ONLINE_UPDATE \
                 $(shell $(PKG_CONFIG) --cflags $(ONLINE_PKGS))
+
+# The app's own version. test-requirements overrides it, min_gui being
+# a comparison against this.
+ONLINE_VERSION = -DVERSION=\"test\"
 ONLINE_LDFLAGS = -lcrypto $(shell $(PKG_CONFIG) --libs $(ONLINE_PKGS))
 
 all: $(TESTS)
@@ -28,15 +32,24 @@ test-biquad: test-biquad.c ../biquad.c ../biquad.h
 test-index-cache: test-index-cache.c alsa-stubs.c ../online-update.c \
                   ../online-update.h ../scarlett4-firmware.c \
                   ../scarlett4-firmware.h
-	$(CC) $(CFLAGS) $(ONLINE_CFLAGS) -o $@ \
+	$(CC) $(CFLAGS) $(ONLINE_CFLAGS) $(ONLINE_VERSION) -o $@ \
 	  test-index-cache.c alsa-stubs.c ../online-update.c \
 	  ../scarlett4-firmware.c $(LDFLAGS) $(ONLINE_LDFLAGS)
 
 test-client-version: test-client-version.c alsa-stubs.c ../online-update.c \
                      ../online-update.h ../scarlett4-firmware.c \
                      ../scarlett4-firmware.h
-	$(CC) $(CFLAGS) $(ONLINE_CFLAGS) -o $@ \
+	$(CC) $(CFLAGS) $(ONLINE_CFLAGS) $(ONLINE_VERSION) -o $@ \
 	  test-client-version.c alsa-stubs.c ../online-update.c \
+	  ../scarlett4-firmware.c $(LDFLAGS) $(ONLINE_LDFLAGS)
+
+# min_gui compares against the app's own compiled-in version, so this
+# one needs a VERSION it can make assertions about
+test-requirements: test-requirements.c alsa-stubs.c ../online-update.c \
+                   ../online-update.h ../scarlett4-firmware.c \
+                   ../scarlett4-firmware.h
+	$(CC) $(CFLAGS) $(ONLINE_CFLAGS) -DVERSION=\"1.0\" \
+	  -o $@ test-requirements.c alsa-stubs.c ../online-update.c \
 	  ../scarlett4-firmware.c $(LDFLAGS) $(ONLINE_LDFLAGS)
 
 test: $(TESTS)

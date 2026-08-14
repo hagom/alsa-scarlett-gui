@@ -64,6 +64,7 @@ static void free_online_firmware(gpointer data) {
   g_free(firmware->sha256);
   g_strfreev(firmware->min_kernel);
   g_free(firmware->min_fcp_server);
+  g_free(firmware->min_gui);
   g_free(firmware);
 }
 
@@ -322,6 +323,24 @@ char *online_firmware_requirement_error(
       );
   }
 
+  /* No firmware has required a newer version of this app, but the check
+   * has to be shipped before the firmware that needs it: an index field
+   * a released client does not read cannot be applied to it later.
+   */
+  if (firmware->min_gui) {
+    uint32_t min[FIRMWARE_VERSION_PARTS];
+
+    // As above, a requirement that cannot be parsed is not one
+    if (!online_parse_version(firmware->min_gui, min))
+      return NULL;
+
+    if (online_client_version_cmp(VERSION, firmware->min_gui) < 0)
+      return g_strdup_printf(
+        "This firmware requires alsa-scarlett-gui %s or later",
+        firmware->min_gui
+      );
+  }
+
   return NULL;
 }
 
@@ -509,6 +528,7 @@ static struct online_firmware *parse_firmware_entry(
   firmware->min_fcp_server = g_strdup(
     get_string_member(obj, "min_fcp_server")
   );
+  firmware->min_gui = g_strdup(get_string_member(obj, "min_gui"));
 
   return firmware;
 }

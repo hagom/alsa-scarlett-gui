@@ -22,6 +22,7 @@ struct online_firmware {
   gsize     size;
   char    **min_kernel;        // NULL-terminated, or NULL
   char     *min_fcp_server;    // or NULL
+  char     *min_gui;           // this app's own version, or NULL
 };
 
 // One client (program) entry from the online update index
@@ -172,7 +173,7 @@ int online_parse_version(const char *version, uint32_t *parts);
  */
 int online_client_version_cmp(const char *a, const char *b);
 
-/* Returns NULL if the running kernel and fcp-server meet the
+/* Returns NULL if the running kernel, fcp-server, and this app meet the
  * firmware's requirements, otherwise a newly allocated message
  * explaining the unmet requirement. fcp_server_version may be NULL
  * (meaning unknown/old, which fails any min_fcp_server requirement).
