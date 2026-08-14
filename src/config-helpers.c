@@ -26,8 +26,15 @@ GtkWidget *config_wrapped_help_label(const char *text, int max_chars) {
   GtkWidget *w = config_help_label(text);
 
   gtk_label_set_wrap(GTK_LABEL(w), TRUE);
-  if (max_chars > 0)
+  if (max_chars > 0) {
+    /* Both, so the wrapped height is measured at the width the label
+     * will actually get. With only a maximum, a wrapped label can be
+     * measured narrow and tall, and a window sized from that asks to
+     * measure itself for less height than it needs.
+     */
+    gtk_label_set_width_chars(GTK_LABEL(w), max_chars);
     gtk_label_set_max_width_chars(GTK_LABEL(w), max_chars);
+  }
 
   gtk_label_set_xalign(GTK_LABEL(w), 0.0);
   gtk_label_set_yalign(GTK_LABEL(w), 0.0);

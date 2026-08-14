@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "config-display.h"
-#include "config-helpers.h"
-#include "gtkhelper.h"
 #include "optional-state.h"
+#include "setting-row.h"
 #include "window-configuration.h"
 #include "window-levels.h"
 #include "window-mixer.h"
@@ -122,40 +121,6 @@ static void on_rate_button_toggled(
   restart_levels_timer(rb->card);
 }
 
-/* One setting: heading and control on the left, description on the
- * right, matching the startup tab.
- */
-static void add_setting(
-  GtkWidget  *grid,
-  int        *grid_y,
-  const char *label,
-  GtkWidget  *control,
-  const char *description
-) {
-  if (*grid_y) {
-    GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-    gtk_widget_set_margin_top(sep, 10);
-    gtk_widget_set_margin_bottom(sep, 10);
-    gtk_grid_attach(GTK_GRID(grid), sep, 0, (*grid_y)++, 2, 1);
-  }
-
-  GtkWidget *heading = config_bold_label(label);
-  gtk_widget_set_valign(heading, GTK_ALIGN_START);
-  gtk_grid_attach(GTK_GRID(grid), heading, 0, *grid_y, 1, 1);
-
-  gtk_widget_set_halign(control, GTK_ALIGN_START);
-  gtk_widget_set_valign(control, GTK_ALIGN_START);
-  gtk_grid_attach(GTK_GRID(grid), control, 0, *grid_y + 1, 1, 1);
-
-  gtk_grid_attach(
-    GTK_GRID(grid),
-    config_wrapped_help_label(description, 70),
-    1, *grid_y, 1, 2
-  );
-
-  *grid_y += 2;
-}
-
 static GtkWidget *make_rate_buttons(struct alsa_card *card) {
   struct rate_buttons *rb = g_malloc0(sizeof(struct rate_buttons));
   rb->card = card;
@@ -194,10 +159,7 @@ static GtkWidget *make_rate_buttons(struct alsa_card *card) {
 }
 
 void add_display_tab(GtkWidget *notebook, struct alsa_card *card) {
-  GtkWidget *grid = gtk_grid_new();
-  gtk_widget_set_margin(grid, 20);
-  gtk_grid_set_column_spacing(GTK_GRID(grid), 20);
-  gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+  GtkWidget *grid = make_settings_grid();
 
   int grid_y = 0;
 
@@ -209,7 +171,7 @@ void add_display_tab(GtkWidget *notebook, struct alsa_card *card) {
     sw, "notify::active",
     G_CALLBACK(on_bottom_right_labels_changed), card
   );
-  add_setting(
+  add_setting_row(
     grid, &grid_y, "Mixer Bottom/Right Labels", sw,
     "The mixer labels its inputs down the left side and its outputs "
     "across the top. Enable this to repeat them along the bottom and "
@@ -218,7 +180,7 @@ void add_display_tab(GtkWidget *notebook, struct alsa_card *card) {
   );
 
   if (card->has_levels)
-    add_setting(
+    add_setting_row(
       grid, &grid_y, "Level Meter Update Rate",
       make_rate_buttons(card),
       "How often the level meters are redrawn, wherever they appear. "
