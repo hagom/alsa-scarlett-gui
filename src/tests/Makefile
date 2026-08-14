@@ -9,7 +9,8 @@ TESTS = test-biquad
 # they are only built when it is enabled
 ONLINE_UPDATE ?= 1
 ifeq ($(ONLINE_UPDATE),1)
-  TESTS += test-index-cache test-client-version test-requirements
+  TESTS += test-index-cache test-client-version test-requirements \
+           test-downloaded
 endif
 
 CFLAGS = -I.. -Wall $(shell $(PKG_CONFIG) --cflags glib-2.0)
@@ -50,6 +51,13 @@ test-requirements: test-requirements.c alsa-stubs.c ../online-update.c \
                    ../scarlett4-firmware.h
 	$(CC) $(CFLAGS) $(ONLINE_CFLAGS) -DVERSION=\"1.0\" \
 	  -o $@ test-requirements.c alsa-stubs.c ../online-update.c \
+	  ../scarlett4-firmware.c $(LDFLAGS) $(ONLINE_LDFLAGS)
+
+test-downloaded: test-downloaded.c alsa-stubs.c ../online-update.c \
+                 ../online-update.h ../scarlett4-firmware.c \
+                 ../scarlett4-firmware.h
+	$(CC) $(CFLAGS) $(ONLINE_CFLAGS) $(ONLINE_VERSION) -o $@ \
+	  test-downloaded.c alsa-stubs.c ../online-update.c \
 	  ../scarlett4-firmware.c $(LDFLAGS) $(ONLINE_LDFLAGS)
 
 test: $(TESTS)

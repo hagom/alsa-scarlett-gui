@@ -426,8 +426,8 @@ static void consider_download(struct alsa_card *card, gboolean retry) {
    * version and the status keeps asking. Without this the same firmware
    * would be downloaded again on every launch.
    *
-   * A user clicking Update still gets a retry, which is the way to
-   * replace a file that arrived corrupt.
+   * A file that does not match the index is deleted rather than kept, so
+   * a corrupt one is replaced on the next attempt instead of sticking.
    */
   if (!retry && online_update_already_downloaded(status->firmware)) {
     if (debug_enabled("update-check"))
