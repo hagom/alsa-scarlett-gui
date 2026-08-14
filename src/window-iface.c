@@ -251,7 +251,8 @@ static void create_card_window(struct alsa_card *card) {
    */
   if (firmware_version < min_firmware_version || mid_upgrade ||
       (update_available && in_msd_mode)) {
-    card->window_main_contents = create_iface_update_main(card);
+    card->window_main_contents =
+      create_iface_update_main(card, mid_upgrade);
     has_configuration = false;
     has_mixer = false;
     is_update_iface = true;

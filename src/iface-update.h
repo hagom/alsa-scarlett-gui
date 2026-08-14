@@ -5,4 +5,8 @@
 
 #include "alsa.h"
 
-GtkWidget *create_iface_update_main(struct alsa_card *card);
+/* The firmware update screen. mid_upgrade says the device is part-way
+ * through an upgrade and the remaining stage starts by itself; the
+ * caller decides it, this being what routed the card here.
+ */
+GtkWidget *create_iface_update_main(struct alsa_card *card, int mid_upgrade);
