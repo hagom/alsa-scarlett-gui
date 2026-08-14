@@ -306,7 +306,6 @@ char *online_firmware_requirement_error(
 
   if (firmware->min_fcp_server) {
     uint32_t min[FIRMWARE_VERSION_PARTS];
-    uint32_t current[FIRMWARE_VERSION_PARTS];
 
     /* An unparseable requirement cannot be checked against anything,
      * so treat it as no requirement rather than blocking every
@@ -315,8 +314,15 @@ char *online_firmware_requirement_error(
     if (!online_parse_version(firmware->min_fcp_server, min))
       return NULL;
 
-    if (!online_parse_version(fcp_server_version, current) ||
-        firmware_version_cmp(current, min) < 0)
+    /* Compared the way client versions are, so that a pre-release of
+     * the required version does not satisfy it. A card reporting no
+     * version is served by a server predating the control, which is
+     * older than anything a requirement can name.
+     */
+    if (!fcp_server_version ||
+        online_client_version_cmp(
+          fcp_server_version, firmware->min_fcp_server
+        ) < 0)
       return g_strdup_printf(
         "This firmware requires fcp-server %s or later",
         firmware->min_fcp_server

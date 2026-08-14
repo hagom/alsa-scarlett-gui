@@ -77,6 +77,23 @@ int main(void) {
   check("fcp-server dev build of the minimum",
         &firmware, "1.0.1.3-g4a26", NULL);
 
+  /* A pre-release is older than the version it precedes, so it does not
+   * satisfy a requirement naming that version
+   */
+  memset(&firmware, 0, sizeof(firmware));
+  firmware.min_fcp_server = "1.0";
+  check("fcp-server pre-release of the minimum",
+        &firmware, "1.0beta1", "fcp-server 1.0");
+  check("fcp-server release meeting it", &firmware, "1.0", NULL);
+
+  // Pre-releases of the same version rank among themselves
+  firmware.min_fcp_server = "1.0beta10";
+  check("fcp-server earlier pre-release",
+        &firmware, "1.0beta9", "fcp-server 1.0beta10");
+  check("fcp-server equal pre-release", &firmware, "1.0beta10", NULL);
+  check("fcp-server later pre-release", &firmware, "1.0beta11", NULL);
+  check("fcp-server release beats pre-release", &firmware, "1.0", NULL);
+
   // An unparseable requirement is treated as no requirement, so that a
   // malformed index cannot block every device
   memset(&firmware, 0, sizeof(firmware));
