@@ -48,6 +48,9 @@ static gboolean on_key_press(
       case GDK_KEY_slash: action = "win.about";     break;
       case GDK_KEY_q: action = "app.quit";          break;
       case GDK_KEY_h: action = "app.hardware";      break;
+#ifdef HAVE_ONLINE_UPDATE
+      case GDK_KEY_p: action = "app.preferences";   break;
+#endif
     }
 
     if (action) {

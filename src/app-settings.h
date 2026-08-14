@@ -49,3 +49,10 @@ void app_settings_set_send_usage_info(gboolean value);
  */
 gboolean app_settings_get_online_choice_made(void);
 void app_settings_set_online_choice_made(void);
+
+/* Whether the preferences window was open when the app last exited.
+ * The per-card windows persist this in each card's state file; this one
+ * has no card to belong to.
+ */
+gboolean app_settings_get_preferences_visible(void);
+void app_settings_set_preferences_visible(gboolean value);

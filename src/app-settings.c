@@ -7,6 +7,7 @@
 
 #define SETTINGS_FILE "settings.conf"
 #define SECTION_ONLINE "online"
+#define SECTION_UI "ui"
 
 char *app_settings_get_config_dir(void) {
   return g_build_filename(
@@ -56,28 +57,26 @@ static GKeyFile *load_settings(void) {
   return NULL;
 }
 
-static gboolean get_boolean(const char *key) {
+static gboolean get_boolean(const char *section, const char *key) {
   GKeyFile *key_file = load_settings();
 
   if (!key_file)
     return FALSE;
 
-  gboolean value = g_key_file_get_boolean(
-    key_file, SECTION_ONLINE, key, NULL
-  );
+  gboolean value = g_key_file_get_boolean(key_file, section, key, NULL);
 
   g_key_file_free(key_file);
 
   return value;
 }
 
-static int get_integer(const char *key) {
+static int get_integer(const char *section, const char *key) {
   GKeyFile *key_file = load_settings();
 
   if (!key_file)
     return 0;
 
-  int value = g_key_file_get_integer(key_file, SECTION_ONLINE, key, NULL);
+  int value = g_key_file_get_integer(key_file, section, key, NULL);
 
   g_key_file_free(key_file);
 
@@ -97,60 +96,73 @@ static void save_settings(GKeyFile *key_file, char *path) {
   g_free(path);
 }
 
-static void set_boolean(const char *key, gboolean value) {
+static void set_boolean(
+  const char *section,
+  const char *key,
+  gboolean    value
+) {
   char *path;
   GKeyFile *key_file = app_settings_load_keyfile(SETTINGS_FILE, &path);
 
   if (!key_file)
     return;
 
-  g_key_file_set_boolean(key_file, SECTION_ONLINE, key, value);
+  g_key_file_set_boolean(key_file, section, key, value);
   save_settings(key_file, path);
 }
 
-static void set_integer(const char *key, int value) {
+static void set_integer(const char *section, const char *key, int value) {
   char *path;
   GKeyFile *key_file = app_settings_load_keyfile(SETTINGS_FILE, &path);
 
   if (!key_file)
     return;
 
-  g_key_file_set_integer(key_file, SECTION_ONLINE, key, value);
+  g_key_file_set_integer(key_file, section, key, value);
   save_settings(key_file, path);
 }
 
 gboolean app_settings_get_check_online_updates(void) {
-  return get_boolean("check-online-updates");
+  return get_boolean(SECTION_ONLINE, "check-online-updates");
 }
 
 /* The usage census rides on the index fetch as query parameters, so it
  * cannot be sent on its own: turning update checks off turns it off too.
  */
 void app_settings_set_check_online_updates(gboolean value) {
-  set_boolean("check-online-updates", value);
+  set_boolean(SECTION_ONLINE, "check-online-updates", value);
 
   if (!value)
-    set_boolean("send-usage-info", FALSE);
+    set_boolean(SECTION_ONLINE, "send-usage-info", FALSE);
 }
 
 // False whenever update checks are off, whatever the file says
 gboolean app_settings_get_send_usage_info(void) {
-  return get_boolean("check-online-updates") &&
-         get_boolean("send-usage-info");
+  return get_boolean(SECTION_ONLINE, "check-online-updates") &&
+         get_boolean(SECTION_ONLINE, "send-usage-info");
 }
 
 // Joining the census means turning on the check it is sent with
 void app_settings_set_send_usage_info(gboolean value) {
-  set_boolean("send-usage-info", value);
+  set_boolean(SECTION_ONLINE, "send-usage-info", value);
 
   if (value)
-    set_boolean("check-online-updates", TRUE);
+    set_boolean(SECTION_ONLINE, "check-online-updates", TRUE);
 }
 
 gboolean app_settings_get_online_choice_made(void) {
-  return get_integer("choice-version") >= ONLINE_CHOICE_VERSION;
+  return get_integer(SECTION_ONLINE, "choice-version") >=
+         ONLINE_CHOICE_VERSION;
 }
 
 void app_settings_set_online_choice_made(void) {
-  set_integer("choice-version", ONLINE_CHOICE_VERSION);
+  set_integer(SECTION_ONLINE, "choice-version", ONLINE_CHOICE_VERSION);
+}
+
+gboolean app_settings_get_preferences_visible(void) {
+  return get_boolean(SECTION_UI, "window-preferences");
+}
+
+void app_settings_set_preferences_visible(gboolean value) {
+  set_boolean(SECTION_UI, "window-preferences", value);
 }

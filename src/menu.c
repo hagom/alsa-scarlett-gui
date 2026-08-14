@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "about.h"
+#include "app-settings.h"
 #include "file.h"
 #include "menu.h"
 #include "optional-state.h"
-#include "window-hardware.h"
 #include "window-configuration.h"
+#include "window-hardware.h"
+#include "window-preferences.h"
 
 // mapping of action names to window offsets within struct alsa_card
 struct window_action {
@@ -86,6 +88,23 @@ static void activate_window(
   save_window_state(card, action_name, new_state);
 }
 
+#ifdef HAVE_ONLINE_UPDATE
+
+/* App-wide, so its visibility goes in the app settings rather than any
+ * card's state file.
+ */
+static void activate_preferences(
+  GSimpleAction *action,
+  GVariant      *parameter,
+  gpointer       data
+) {
+  app_settings_set_preferences_visible(
+    toggle_visibility(action, window_preferences)
+  );
+}
+
+#endif
+
 static void activate_hardware(
   GSimpleAction *action,
   GVariant      *parameter,
@@ -105,6 +124,9 @@ static void activate_quit(
 static const GActionEntry app_entries[] = {
   {"hardware", activate_hardware, NULL, "false"},
   {"quit",     activate_quit},
+#ifdef HAVE_ONLINE_UPDATE
+  {"preferences", activate_preferences, NULL, "false"},
+#endif
 };
 
 struct menu_item {
@@ -138,6 +160,9 @@ static const struct menu_data menus[] = {
       { "_Levels",        "win.levels",        { "<Control>L", NULL } },
       { "_DSP",           "win.dsp",           { "<Control>D", NULL } },
       { "_Configuration", "win.configuration", { "<Control>G", NULL } },
+#ifdef HAVE_ONLINE_UPDATE
+      { "_Preferences",   "app.preferences",   { "<Control>P", NULL } },
+#endif
       {}
     }
   },

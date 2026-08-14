@@ -3,6 +3,7 @@
 
 #include "alsa.h"
 #include "alsa-sim.h"
+#include "app-settings.h"
 #include "welcome.h"
 #include "debug.h"
 #include "firmware-dir.h"
@@ -11,6 +12,7 @@
 #include "window-consent.h"
 #include "window-hardware.h"
 #include "window-iface.h"
+#include "window-preferences.h"
 
 GtkApplication *app;
 
@@ -59,6 +61,13 @@ static void startup_continue(GtkApplication *app, gpointer user_data) {
 
   create_no_card_window();
   create_hardware_window(app);
+#ifdef HAVE_ONLINE_UPDATE
+  create_preferences_window(app);
+  if (app_settings_get_preferences_visible())
+    g_action_group_activate_action(
+      G_ACTION_GROUP(app), "preferences", NULL
+    );
+#endif
 
   startup_complete = TRUE;
 
