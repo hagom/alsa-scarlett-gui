@@ -88,6 +88,31 @@ static void activate_window(
   save_window_state(card, action_name, new_state);
 }
 
+// Open the configuration window (if not already open) and select the
+// tab named by the string parameter; used for remote control/scripting
+static void activate_config_tab(
+  GSimpleAction *action,
+  GVariant      *parameter,
+  gpointer       data
+) {
+  struct alsa_card *card = data;
+
+  if (!card->window_configuration)
+    return;
+
+  if (!gtk_widget_get_visible(card->window_configuration)) {
+    GAction *config_action = g_action_map_lookup_action(
+      G_ACTION_MAP(card->window_main), "configuration"
+    );
+    set_window_visible(
+      G_SIMPLE_ACTION(config_action), card->window_configuration, TRUE
+    );
+    save_window_state(card, "configuration", TRUE);
+  }
+
+  configuration_select_tab(card, g_variant_get_string(parameter, NULL));
+}
+
 #ifdef HAVE_ONLINE_UPDATE
 
 /* App-wide, so its visibility goes in the app settings rather than any
@@ -244,7 +269,8 @@ static const GActionEntry levels_entries[] = {
 };
 
 static const GActionEntry configuration_entries[] = {
-  {"configuration", activate_window, NULL, "false"}
+  {"configuration", activate_window,     NULL, "false"},
+  {"config-tab",    activate_config_tab, "s"}
 };
 
 void add_mixer_action_map(struct alsa_card *card) {
@@ -273,6 +299,15 @@ void add_configuration_action_map(struct alsa_card *card) {
     G_N_ELEMENTS(configuration_entries),
     card
   );
+
+  // Stateful action whose state lists the available configuration tab
+  // ids, so a script can capture only the tabs that actually exist. The
+  // configuration window is already built at this point.
+  GSimpleAction *tabs = g_simple_action_new_stateful(
+    "config-tabs", NULL, configuration_tab_ids(card)
+  );
+  g_action_map_add_action(G_ACTION_MAP(card->window_main), G_ACTION(tabs));
+  g_object_unref(tabs);
 }
 
 static const GActionEntry dsp_entries[] = {

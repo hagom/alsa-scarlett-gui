@@ -81,6 +81,97 @@ static int find_page_by_id(GtkNotebook *notebook, const char *page_id) {
   return -1;
 }
 
+// Search every notebook under root for a page whose PAGE_ID_KEY matches
+// page_id. On a match, select that page and, as the recursion unwinds,
+// select each ancestor notebook page that contains it, so a nested tab
+// is revealed along with its outer tabs.
+static gboolean select_tab(GtkWidget *root, const char *page_id) {
+  if (GTK_IS_NOTEBOOK(root)) {
+    GtkNotebook *nb = GTK_NOTEBOOK(root);
+    int n = gtk_notebook_get_n_pages(nb);
+    for (int i = 0; i < n; i++) {
+      GtkWidget *page = gtk_notebook_get_nth_page(nb, i);
+      const char *id = g_object_get_data(G_OBJECT(page), PAGE_ID_KEY);
+      if ((id && strcmp(id, page_id) == 0) || select_tab(page, page_id)) {
+        gtk_notebook_set_current_page(nb, i);
+        return TRUE;
+      }
+    }
+    return FALSE;
+  }
+
+  for (GtkWidget *c = gtk_widget_get_first_child(root);
+       c;
+       c = gtk_widget_get_next_sibling(c))
+    if (select_tab(c, page_id))
+      return TRUE;
+
+  return FALSE;
+}
+
+gboolean configuration_select_tab(struct alsa_card *card, const char *page_id) {
+  if (!card->window_configuration)
+    return FALSE;
+
+  GtkWidget *content =
+    gtk_window_get_child(GTK_WINDOW(card->window_configuration));
+  if (!content)
+    return FALSE;
+
+  return select_tab(content, page_id);
+}
+
+// Collect the PAGE_ID_KEY of every leaf notebook page under root, in
+// display order, into ids. A page that itself contains a nested notebook
+// (e.g. I/O Configuration) is skipped in favour of its inner pages, so
+// each entry maps to a distinct capture. Returns TRUE if it added any id
+// from within root. The strings are owned by the widgets.
+static gboolean collect_tab_ids(GtkWidget *root, GPtrArray *ids) {
+  gboolean added = FALSE;
+
+  if (GTK_IS_NOTEBOOK(root)) {
+    GtkNotebook *nb = GTK_NOTEBOOK(root);
+    int n = gtk_notebook_get_n_pages(nb);
+    for (int i = 0; i < n; i++) {
+      GtkWidget *page = gtk_notebook_get_nth_page(nb, i);
+      gboolean nested = collect_tab_ids(page, ids);
+      const char *id = g_object_get_data(G_OBJECT(page), PAGE_ID_KEY);
+      if (id && !nested)
+        g_ptr_array_add(ids, (gpointer)id);
+      if (id || nested)
+        added = TRUE;
+    }
+    return added;
+  }
+
+  for (GtkWidget *c = gtk_widget_get_first_child(root);
+       c;
+       c = gtk_widget_get_next_sibling(c))
+    if (collect_tab_ids(c, ids))
+      added = TRUE;
+
+  return added;
+}
+
+// Return a floating "as" GVariant listing the configuration tab ids in
+// display order (empty if there is no configuration window), for use as
+// the state of the win.config-tabs action.
+GVariant *configuration_tab_ids(struct alsa_card *card) {
+  GPtrArray *ids = g_ptr_array_new();
+
+  if (card->window_configuration) {
+    GtkWidget *content =
+      gtk_window_get_child(GTK_WINDOW(card->window_configuration));
+    if (content)
+      collect_tab_ids(content, ids);
+  }
+  g_ptr_array_add(ids, NULL);
+
+  GVariant *v = g_variant_new_strv((const char * const *)ids->pdata, -1);
+  g_ptr_array_free(ids, TRUE);
+  return v;
+}
+
 // Restore the saved tab selection and connect signal to save changes
 void setup_notebook_tab_persistence(
   GtkNotebook      *notebook,

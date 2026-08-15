@@ -19,3 +19,10 @@ void setup_notebook_tab_persistence(
 );
 
 GtkWidget *create_configuration_controls(struct alsa_card *card);
+
+// Select a top-level configuration tab by its page ID; returns FALSE if
+// the configuration window or the requested page does not exist
+gboolean configuration_select_tab(struct alsa_card *card, const char *page_id);
+
+// Floating "as" GVariant of the configuration tab ids in display order
+GVariant *configuration_tab_ids(struct alsa_card *card);
