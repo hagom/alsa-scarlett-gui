@@ -173,6 +173,17 @@ int online_parse_version(const char *version, uint32_t *parts);
  */
 int online_client_version_cmp(const char *a, const char *b);
 
+/* Check a kernel release against a firmware's min_kernel list, which
+ * names the first release of each branch to carry what the firmware
+ * needs. A branch named in the list is held to its own entry; one not
+ * named never received the backport and is held to the highest entry.
+ *
+ * Returns NULL if the release qualifies, otherwise a newly allocated
+ * message naming the version it falls short of. Takes the release
+ * rather than reading uname(), so that it can be tested.
+ */
+char *online_min_kernel_error(const char *release, char **min_kernel);
+
 /* Returns NULL if the running kernel, fcp-server, and this app meet the
  * firmware's requirements, otherwise a newly allocated message
  * explaining the unmet requirement. fcp_server_version may be NULL

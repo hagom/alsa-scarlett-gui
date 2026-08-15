@@ -250,25 +250,39 @@ static int parse_strict_version(const char *version, uint32_t *parts) {
   return count;
 }
 
-/* Check the running kernel against the firmware's min_kernel list:
- * a branch (major.minor) listed there requires at least that entry,
- * and unlisted branches require at least the last (highest) entry.
+/* Check the running kernel against the firmware's min_kernel list.
+ *
+ * A fix reaches mainline once and is backported to whichever stable
+ * branches are still maintained, so the list names the first release of
+ * each: "6.18.39" says the 6.18 branch has it from .39, and a bare
+ * "7.2" says mainline has it from there on.
+ *
+ * A branch named in the list is therefore held to its own entry, and a
+ * branch not named never received the backport, so it is held to the
+ * highest entry — the point from which every later kernel has the fix.
+ *
+ * The highest is searched for rather than taken as the last, so that a
+ * list in the wrong order refuses a kernel it cannot vouch for instead
+ * of accepting one.
  */
-static char *check_min_kernel(char **min_kernel) {
-  struct utsname uts;
+char *online_min_kernel_error(const char *release, char **min_kernel) {
   uint32_t kernel[FIRMWARE_VERSION_PARTS];
 
-  if (uname(&uts) < 0 ||
-      online_parse_version(uts.release, kernel) < 2)
+  if (!release || online_parse_version(release, kernel) < 2)
     return g_strdup("Cannot determine the running kernel version");
 
-  const char *last = NULL;
+  const char *highest = NULL;
+  uint32_t highest_parts[FIRMWARE_VERSION_PARTS];
+
   for (char **entry = min_kernel; *entry; entry++) {
     uint32_t min[FIRMWARE_VERSION_PARTS];
     if (online_parse_version(*entry, min) < 2)
       continue;
 
-    last = *entry;
+    if (!highest || firmware_version_cmp(min, highest_parts) > 0) {
+      highest = *entry;
+      memcpy(highest_parts, min, sizeof(highest_parts));
+    }
 
     // Same branch?
     if (kernel[0] == min[0] && kernel[1] == min[1]) {
@@ -280,18 +294,24 @@ static char *check_min_kernel(char **min_kernel) {
     }
   }
 
-  if (!last)
+  if (!highest)
     return NULL;
 
-  uint32_t min[FIRMWARE_VERSION_PARTS];
-  online_parse_version(last, min);
-
-  if (firmware_version_cmp(kernel, min) >= 0)
+  if (firmware_version_cmp(kernel, highest_parts) >= 0)
     return NULL;
 
   return g_strdup_printf(
-    "This firmware requires kernel %s or later", last
+    "This firmware requires kernel %s or later", highest
   );
+}
+
+static char *check_min_kernel(char **min_kernel) {
+  struct utsname uts;
+
+  if (uname(&uts) < 0)
+    return g_strdup("Cannot determine the running kernel version");
+
+  return online_min_kernel_error(uts.release, min_kernel);
 }
 
 char *online_firmware_requirement_error(

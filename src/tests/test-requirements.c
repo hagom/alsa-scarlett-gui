@@ -11,8 +11,9 @@
  * Built with VERSION set to a known value, min_gui being a comparison
  * against the app's own compiled-in version.
  *
- * The min_kernel cases are not asserted here: the check reads the
- * running kernel through uname(), which a test cannot steer.
+ * The min_kernel cases go through online_min_kernel_error(), which
+ * takes the release rather than reading uname(), so they can be
+ * asserted against kernels this machine is not running.
  */
 
 #include <stdio.h>
@@ -48,6 +49,83 @@ static void check(
     failures++;
 
   g_free(error);
+}
+
+// want is TRUE if the release should be accepted
+static void check_kernel(
+  const char *desc,
+  const char *release,
+  char      **min_kernel,
+  gboolean    want
+) {
+  char *error = online_min_kernel_error(release, min_kernel);
+  gboolean ok = want ? error == NULL : error != NULL;
+
+  printf("%-46s %s\n", desc, ok ? "ok" : "FAIL");
+
+  if (!ok)
+    failures++;
+
+  g_free(error);
+}
+
+static void check_kernels(void) {
+  /* A fix in mainline from 6.10, backported to the 6.8 branch at .12
+   * and the 6.9 branch at .5. A branch is held to its own entry, so
+   * being in 6.8.12 says nothing about 6.9.0.
+   */
+  char *backported[] = { "6.8.12", "6.9.5", "6.10", NULL };
+
+  check_kernel("branch entry: below it",
+               "6.8.11", backported, FALSE);
+  check_kernel("branch entry: at it",
+               "6.8.12", backported, TRUE);
+  check_kernel("branch entry: above it",
+               "6.8.20", backported, TRUE);
+  check_kernel("later branch is not covered by an earlier one",
+               "6.9.0", backported, FALSE);
+  check_kernel("that branch's own entry",
+               "6.9.5", backported, TRUE);
+  check_kernel("mainline entry",
+               "6.10", backported, TRUE);
+  check_kernel("newer than every entry",
+               "6.11.3", backported, TRUE);
+  check_kernel("older than every entry",
+               "6.7", backported, FALSE);
+
+  /* A branch with no entry never received the backport, so it is held
+   * to the highest entry however close to one it looks
+   */
+  char *gapped[] = { "6.8.12", "6.10", NULL };
+
+  check_kernel("unlisted branch between two entries",
+               "6.9.7", gapped, FALSE);
+
+  // A single bare entry is the ordinary "this release and later"
+  char *floor[] = { "6.8", NULL };
+
+  check_kernel("bare entry: the release itself", "6.8", floor, TRUE);
+  check_kernel("bare entry: a later patch", "6.8.9", floor, TRUE);
+  check_kernel("bare entry: a later branch", "7.1", floor, TRUE);
+  check_kernel("bare entry: an earlier release", "6.7.9", floor, FALSE);
+
+  /* The highest entry is searched for rather than assumed last, so a
+   * list in the wrong order still refuses what it cannot vouch for
+   */
+  char *unsorted[] = { "7.1", "6.8.12", NULL };
+
+  check_kernel("out of order: unlisted branch below the highest",
+               "6.9", unsorted, FALSE);
+  check_kernel("out of order: branch entry still honoured",
+               "6.8.12", unsorted, TRUE);
+  check_kernel("out of order: above the highest",
+               "7.2", unsorted, TRUE);
+
+  // A release string carries a distro suffix
+  check_kernel("distro suffix", "7.1.5-201.fc44.x86_64", floor, TRUE);
+
+  // Unusable input is reported rather than passed
+  check_kernel("unparseable release", "banana", floor, FALSE);
 }
 
 int main(void) {
@@ -129,6 +207,8 @@ int main(void) {
   firmware.min_gui = "9.9";
   check("fcp-server reported before gui",
         &firmware, "1.0", "fcp-server");
+
+  check_kernels();
 
   printf("\n%s\n", failures ? "FAILURES" : "all passed");
 
