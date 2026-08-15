@@ -299,6 +299,7 @@ static void create_card_window(struct alsa_card *card) {
     GTK_APPLICATION_WINDOW(card->window_main), TRUE
   );
   add_window_action_map(GTK_WINDOW(card->window_main));
+  add_screenshot_action_map(card);
   if (has_configuration)
     add_configuration_action_map(card);
   if (has_mixer)

@@ -403,6 +403,9 @@ void fatal_alsa_error(const char *msg, int err);
 
 // locate elements or get information about them
 struct alsa_elem *get_elem_by_name(GPtrArray *elems, const char *name);
+gboolean alsa_set_elem_by_name(
+  struct alsa_card *card, const char *name, const char *value
+);
 struct alsa_elem *get_elem_by_prefix(GPtrArray *elems, const char *prefix);
 struct alsa_elem *get_elem_by_substr(GPtrArray *elems, const char *substr);
 int get_max_elem_by_name(

@@ -9,6 +9,7 @@
 #include "window-configuration.h"
 #include "window-hardware.h"
 #include "window-preferences.h"
+#include "window-screenshot.h"
 
 // mapping of action names to window offsets within struct alsa_card
 struct window_action {
@@ -138,6 +139,45 @@ static void activate_hardware(
   toggle_visibility(action, window_hardware);
 }
 
+// Render a card window to a PNG file, named by "main" or a subwindow
+// action name (routing/mixer/levels/configuration/dsp); used for
+// documentation screenshots
+static void activate_screenshot(
+  GSimpleAction *action,
+  GVariant      *parameter,
+  gpointer       data
+) {
+  struct alsa_card *card = data;
+  const char *name, *path;
+  g_variant_get(parameter, "(&s&s)", &name, &path);
+
+  GtkWidget *window;
+  if (strcmp(name, "main") == 0) {
+    window = card->window_main;
+  } else {
+    const struct window_action *entry = find_window_action(name);
+    window = entry ? get_card_window(card, entry->window_offset) : NULL;
+  }
+
+  if (window)
+    screenshot_widget_to_png(window, path);
+}
+
+// Set a control's value by name, as if the user had changed it in the
+// UI, so documentation tooling can capture before/after states such as
+// stereo link, port visibility, and custom names.
+static void activate_set_control(
+  GSimpleAction *action,
+  GVariant      *parameter,
+  gpointer       data
+) {
+  struct alsa_card *card = data;
+  const char *name, *value;
+  g_variant_get(parameter, "(&s&s)", &name, &value);
+
+  alsa_set_elem_by_name(card, name, value);
+}
+
 static void activate_quit(
   GSimpleAction *action,
   GVariant      *parameter,
@@ -255,6 +295,20 @@ void add_load_save_action_map(struct alsa_card *card) {
     G_ACTION_MAP(card->window_main),
     load_save_entries,
     G_N_ELEMENTS(load_save_entries),
+    card
+  );
+}
+
+static const GActionEntry screenshot_entries[] = {
+  {"screenshot",  activate_screenshot,  "(ss)"},
+  {"set-control", activate_set_control, "(ss)"}
+};
+
+void add_screenshot_action_map(struct alsa_card *card) {
+  g_action_map_add_action_entries(
+    G_ACTION_MAP(card->window_main),
+    screenshot_entries,
+    G_N_ELEMENTS(screenshot_entries),
     card
   );
 }

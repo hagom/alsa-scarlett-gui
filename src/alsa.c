@@ -108,6 +108,27 @@ struct alsa_elem *get_elem_by_name(GPtrArray *elems, const char *name) {
   return NULL;
 }
 
+// Set a control by name from a string, as if the user had changed it in
+// the UI: BYTES elements take the text verbatim, others a decimal
+// integer. Returns FALSE if no element has that name. Triggers callbacks
+// either way, so the UI updates.
+gboolean alsa_set_elem_by_name(
+  struct alsa_card *card,
+  const char       *name,
+  const char       *value
+) {
+  struct alsa_elem *elem = get_elem_by_name(card->elems, name);
+  if (!elem)
+    return FALSE;
+
+  if (elem->type == SND_CTL_ELEM_TYPE_BYTES)
+    alsa_set_elem_bytes(elem, value, strlen(value));
+  else
+    alsa_set_elem_value(elem, (int)g_ascii_strtoll(value, NULL, 10));
+
+  return TRUE;
+}
+
 // return the first element with a name starting with the given prefix
 struct alsa_elem *get_elem_by_prefix(GPtrArray *elems, const char *prefix) {
   int prefix_len = strlen(prefix);
