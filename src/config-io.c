@@ -1219,10 +1219,19 @@ static void add_snk_enables_for_category(
       // No partner - fall through to single channel handling
     }
 
-    // Single channel (no partner or fixed mixer inputs)
+    // Single channel (no partner or fixed mixer inputs).
+    // Non-fixed mixer/DSP inputs have a link-button column at column 0,
+    // so their checkbox and label shift right by one to stay aligned
+    // with the linkable pairs.
+    gboolean has_link_column =
+      (port_category == PC_MIX || port_category == PC_DSP) &&
+      !card->has_fixed_mixer_inputs;
+    int check_col = has_link_column ? 1 : 0;
+    int label_col = has_link_column ? 2 : 1;
+
     GtkWidget *checkbox = create_enable_checkbox(snk->enable_elem);
     if (checkbox)
-      gtk_grid_attach(GTK_GRID(grid), checkbox, 0, row, 1, 1);
+      gtk_grid_attach(GTK_GRID(grid), checkbox, check_col, row, 1, 1);
 
     // Label
     GtkWidget *label;
@@ -1234,7 +1243,7 @@ static void add_snk_enables_for_category(
       g_free(label_text);
       gtk_widget_set_halign(label, GTK_ALIGN_START);
     }
-    gtk_grid_attach(GTK_GRID(grid), label, 1, row, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), label, label_col, row, 1, 1);
 
     row++;
 
