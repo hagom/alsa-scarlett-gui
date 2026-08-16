@@ -5,6 +5,7 @@
 #include "gtkhelper.h"
 #include "hw-io-availability.h"
 #include "widget-boolean.h"
+#include "window-geometry.h"
 #include "window-mixer.h"
 #include "window-routing.h"
 
@@ -401,6 +402,8 @@ GtkWidget *make_sample_rate_widget(
 
   // cleanup when the button is destroyed
   g_object_weak_ref(G_OBJECT(data->button), (GWeakNotify)on_destroy, data);
+
+  widget_doc_register_named(data->button, "Sample Rate");
 
   return data->button;
 }

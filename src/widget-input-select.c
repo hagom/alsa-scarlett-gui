@@ -3,6 +3,7 @@
 
 #include "stringhelper.h"
 #include "widget-input-select.h"
+#include "window-geometry.h"
 
 struct input_select {
   struct alsa_elem *elem;
@@ -111,6 +112,8 @@ GtkWidget *make_input_select_alsa_elem(
     alsa_elem_add_callback(gui_link_elem, input_select_updated, data, NULL);
 
   input_select_updated(elem, data);
+
+  widget_doc_register(data->button, elem);
 
   return data->button;
 }

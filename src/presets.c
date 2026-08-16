@@ -8,6 +8,7 @@
 #include "error.h"
 #include "file.h"
 #include "presets.h"
+#include "window-geometry.h"
 
 // Data structure for the presets button and popover
 struct presets_data {
@@ -489,6 +490,8 @@ GtkWidget *create_presets_button(struct alsa_card *card) {
     G_OBJECT(button), "presets-data",
     data, free_presets_data
   );
+
+  widget_doc_register_named(button, "Presets");
 
   return button;
 }

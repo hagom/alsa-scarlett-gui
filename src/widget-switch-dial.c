@@ -4,6 +4,7 @@
 #include "gtkdial.h"
 #include "widget-boolean.h"
 #include "widget-switch-dial.h"
+#include "window-geometry.h"
 
 // The level dial pops up as a floating child of the main window's
 // GtkOverlay rather than a GtkPopover: a popover is a separate surface
@@ -196,6 +197,8 @@ GtkWidget *make_switch_dial_alsa_elem(
 
   level_updated(level_elem, data);
   alsa_elem_add_callback(level_elem, level_updated, data, NULL);
+
+  widget_doc_register(box, switch_elem);
 
   return box;
 }

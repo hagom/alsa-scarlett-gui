@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "widget-text-entry.h"
+#include "window-geometry.h"
 
 struct text_entry {
   struct alsa_elem *elem;
@@ -85,6 +86,8 @@ GtkWidget *make_text_entry_alsa_elem(struct alsa_elem *elem) {
 
   // register cleanup callback
   g_object_weak_ref(G_OBJECT(data->entry), (GWeakNotify)on_destroy, data);
+
+  widget_doc_register(data->entry, elem);
 
   return data->entry;
 }

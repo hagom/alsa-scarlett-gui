@@ -9,6 +9,7 @@
 #include "stereo-link.h"
 #include "stringhelper.h"
 #include "widget-boolean.h"
+#include "window-geometry.h"
 #include "window-mixer.h"
 #include "window-routing.h"
 #include "custom-names.h"
@@ -1446,6 +1447,8 @@ static void setup_src_socket(struct routing_src *r_src) {
   g_object_set_data(G_OBJECT(socket), "routing_src", r_src);
   gtk_widget_add_css_class(socket, "route-label");
 
+  widget_doc_register_named(socket, r_src->name);
+
   // Stereo link handling
   struct alsa_elem *link_elem = get_src_link_elem(r_src);
   if (link_elem) {
@@ -1505,6 +1508,8 @@ static void setup_snk_socket(struct routing_snk *r_snk) {
 
   g_object_set_data(G_OBJECT(socket), "routing_snk", r_snk);
   gtk_widget_add_css_class(socket, "route-label");
+
+  widget_doc_register(socket, r_snk->elem);
 
   // Stereo link handling
   struct alsa_elem *link_elem = get_snk_link_elem(r_snk);

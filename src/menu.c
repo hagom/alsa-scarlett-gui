@@ -9,6 +9,7 @@
 #include "window-configuration.h"
 #include "window-hardware.h"
 #include "window-preferences.h"
+#include "window-geometry.h"
 #include "window-screenshot.h"
 
 // mapping of action names to window offsets within struct alsa_card
@@ -159,8 +160,24 @@ static void activate_screenshot(
     window = entry ? get_card_window(card, entry->window_offset) : NULL;
   }
 
-  if (window)
-    screenshot_widget_to_png(window, path);
+  if (!window)
+    return;
+
+  screenshot_widget_to_png(window, path);
+
+  // Alongside the PNG, write a <path>.json sidecar (.png replaced with
+  // .json where present) describing the documented regions within it.
+  char *json_path;
+  if (g_str_has_suffix(path, ".png"))
+    json_path = g_strdup_printf("%.*s.json", (int)(strlen(path) - 4), path);
+  else
+    json_path = g_strconcat(path, ".json", NULL);
+
+  char *image_name = g_path_get_basename(path);
+  export_widget_geometry_to_json(window, image_name, json_path);
+
+  g_free(image_name);
+  g_free(json_path);
 }
 
 // Set a control's value by name, as if the user had changed it in the

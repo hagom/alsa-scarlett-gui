@@ -3,6 +3,7 @@
 
 #include "gtkhelper.h"
 #include "widget-boolean.h"
+#include "window-geometry.h"
 
 struct boolean {
   struct alsa_elem *elem;
@@ -128,6 +129,8 @@ GtkWidget *make_boolean_alsa_elem(
 
   // store the data so we can retrieve it later for updating labels
   g_object_set_data(G_OBJECT(data->button), "boolean_data", data);
+
+  widget_doc_register(data->button, data->elem);
 
   return data->button;
 }

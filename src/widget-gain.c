@@ -4,6 +4,7 @@
 #include "gtkdial.h"
 #include "stringhelper.h"
 #include "widget-gain.h"
+#include "window-geometry.h"
 #include "db.h"
 
 // level meter colours for gain dials with level display
@@ -314,6 +315,8 @@ static GtkWidget *finish_gain_widget(struct gain *data) {
 
   g_object_set_data(G_OBJECT(data->vbox), "dial", data->dial);
   g_object_set_data(G_OBJECT(data->vbox), "gain_data", data);
+
+  widget_doc_register(data->vbox, data->elem);
 
   return data->vbox;
 }

@@ -8,6 +8,7 @@
 #include "port-enable.h"
 #include "stereo-link.h"
 #include "widget-drop-down-two-level.h"
+#include "window-geometry.h"
 
 // Structure to track a group of items
 struct item_group {
@@ -596,6 +597,8 @@ static GtkWidget *create_dropdown_common(
   alsa_elem_add_callback(
     data->elem, drop_down_updated, data, NULL
   );
+
+  widget_doc_register(data->button, data->elem);
 
   return data->button;
 }

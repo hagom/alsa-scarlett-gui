@@ -10,6 +10,7 @@
 #include "stereo-link.h"
 #include "widget-text-entry.h"
 #include "window-configuration.h"
+#include "window-geometry.h"
 #include "config-io.h"
 
 // Key for I/O sub-tab persistence
@@ -340,6 +341,8 @@ static GtkWidget *create_link_button(struct alsa_elem *link_elem) {
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(link_button), value != 0);
   update_link_button_appearance(GTK_TOGGLE_BUTTON(link_button));
 
+  widget_doc_register(link_button, link_elem);
+
   return link_button;
 }
 
@@ -416,6 +419,8 @@ static GtkWidget *create_enable_checkbox(struct alsa_elem *enable_elem) {
 
   int value = alsa_get_elem_value(enable_elem);
   gtk_check_button_set_active(GTK_CHECK_BUTTON(checkbox), value != 0);
+
+  widget_doc_register(checkbox, enable_elem);
 
   return checkbox;
 }

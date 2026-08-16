@@ -5,6 +5,7 @@
 
 #include "gtkhelper.h"
 #include "widget-drop-down.h"
+#include "window-geometry.h"
 
 // Two construction modes share this state:
 //   Enum mode (ops == NULL): model is built from alsa_get_item_name
@@ -367,6 +368,8 @@ static void build_drop_down(struct drop_down *data, const char *label_text) {
   drop_down_updated(data->elem, data);
 
   alsa_elem_add_callback(data->elem, drop_down_updated, data, NULL);
+
+  widget_doc_register(data->widget, data->elem);
 }
 
 GtkWidget *make_drop_down_alsa_elem(

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "widget-dual.h"
+#include "window-geometry.h"
 
 struct dual_button {
   struct alsa_elem *elem;
@@ -83,6 +84,8 @@ GtkWidget *make_dual_boolean_alsa_elems(
   gtk_box_append(GTK_BOX(box), label);
   gtk_box_append(GTK_BOX(box), GTK_WIDGET(data->button1));
   gtk_box_append(GTK_BOX(box), GTK_WIDGET(data->button2));
+
+  widget_doc_register(box, data->elem);
 
   return box;
 }
