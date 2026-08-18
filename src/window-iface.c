@@ -238,7 +238,7 @@ static void create_card_window(struct alsa_card *card) {
 
   // set has_levels flag and load display prefs before building UI
   card->has_levels =
-    !!get_elem_by_name(card->elems, "Firmware Version");
+    !!get_elem_by_name(card->elems, "Level Meter");
   load_display_prefs(card);
 
   /* Take over the window for a firmware update when it is required, when

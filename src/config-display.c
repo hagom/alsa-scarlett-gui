@@ -159,25 +159,34 @@ static GtkWidget *make_rate_buttons(struct alsa_card *card) {
 }
 
 void add_display_tab(GtkWidget *notebook, struct alsa_card *card) {
+  int has_mixer = card->routing_in_count[PC_MIX] > 0;
+
+  // Nothing to display without a mixer or level meters (e.g. Scarlett
+  // 3rd Gen Solo and 2i2)
+  if (!has_mixer && !card->has_levels)
+    return;
+
   GtkWidget *grid = make_settings_grid();
 
   int grid_y = 0;
 
-  GtkWidget *sw = gtk_switch_new();
-  gtk_switch_set_active(
-    GTK_SWITCH(sw), card->pref_show_bottom_right_labels
-  );
-  g_signal_connect(
-    sw, "notify::active",
-    G_CALLBACK(on_bottom_right_labels_changed), card
-  );
-  add_setting_row(
-    grid, &grid_y, "Mixer Bottom/Right Labels", sw,
-    "The mixer labels its inputs down the left side and its outputs "
-    "across the top. Enable this to repeat them along the bottom and "
-    "right edges as well, to make it easier to see which input and "
-    "output a gain control belongs to on a large matrix."
-  );
+  if (has_mixer) {
+    GtkWidget *sw = gtk_switch_new();
+    gtk_switch_set_active(
+      GTK_SWITCH(sw), card->pref_show_bottom_right_labels
+    );
+    g_signal_connect(
+      sw, "notify::active",
+      G_CALLBACK(on_bottom_right_labels_changed), card
+    );
+    add_setting_row(
+      grid, &grid_y, "Mixer Bottom/Right Labels", sw,
+      "The mixer labels its inputs down the left side and its outputs "
+      "across the top. Enable this to repeat them along the bottom and "
+      "right edges as well, to make it easier to see which input and "
+      "output a gain control belongs to on a large matrix."
+    );
+  }
 
   if (card->has_levels)
     add_setting_row(
