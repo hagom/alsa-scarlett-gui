@@ -127,9 +127,11 @@ open the Levels window.
 
 When the “Autogain” control is enabled, the interface will listen to
 the input signal for ten seconds and automatically adjust the gain to
-get the best signal level. When autogain is not running, the
-most-recent autogain exit status is shown below the “Autogain”
-control.
+get the best signal level. An Autogain window opens showing a spinner
+for each channel the interface is running Autogain on, then the result
+for each. “Cancel” stops a run in progress, putting the gain back to
+what it was; “OK” dismisses the results. Autogain can be run on more
+than one channel at a time, so the window is not modal.
 
 #### Safe
 

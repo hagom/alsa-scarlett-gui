@@ -17,8 +17,8 @@
 #include "widget-dual.h"
 #include "widget-gain.h"
 #include "widget-input-select.h"
-#include "widget-label.h"
 #include "widget-sample-rate.h"
+#include "window-autogain.h"
 #include "window-configuration.h"
 #include "window-dsp.h"
 #include "window-helper.h"
@@ -835,20 +835,10 @@ static void create_input_autogain_control(
     w,
     "Autogain will listen to the input signal for 10 seconds and "
     "automatically set the gain of the input channel to get the "
-    "best signal level."
+    "best signal level. Progress and the result are shown in the "
+    "Autogain window."
   );
   gate_input_control_on_type(w, elem, INPUT_TYPE_MASK_MIC_INST);
-
-  gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
-}
-
-static void create_input_autogain_status_control(
-  struct alsa_elem *elem,
-  GtkWidget        *grid,
-  int               current_row,
-  int               column_num
-) {
-  GtkWidget *w = make_label_alsa_elem(elem);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
@@ -1857,24 +1847,6 @@ static void register_pair_elem_sync(
   alsa_elem_add_callback(right, pair_elem_sync_updated, data, g_free);
 }
 
-// find the routing source for an analogue input by channel number
-static struct routing_src *get_analogue_input_src(
-  struct alsa_card *card,
-  int               lr_num
-) {
-  for (int i = 0; i < card->routing_srcs->len; i++) {
-    struct routing_src *src = &g_array_index(
-      card->routing_srcs, struct routing_src, i
-    );
-
-    if (src->port_category == PC_HW &&
-        src->hw_type == HW_TYPE_ANALOGUE &&
-        src->lr_num == lr_num)
-      return src;
-  }
-  return NULL;
-}
-
 // A control that spans several input channels (e.g. a 48V switch
 // covering four inputs) is shared by more than one input strip, so its
 // visibility can't be driven by any single strip's enable state. It is
@@ -2157,10 +2129,6 @@ static void create_input_controls(
   create_input_controls_by_type(
     elems, input_grid, &current_row,
     "Autogain Capture Switch", create_input_autogain_control
-  );
-  create_input_controls_by_type(
-    elems, input_grid, &current_row,
-    "Autogain Status Capture Enum", create_input_autogain_status_control
   );
   create_input_controls_by_type(
     elems, input_grid, &current_row,
@@ -2642,16 +2610,7 @@ static GtkWidget *create_main_window_controls(struct alsa_card *card) {
   gtk_widget_add_css_class(top, "window-content");
   gtk_widget_add_css_class(top, "iface-mixer");
 
-  if (strstr(card->name, "4th Gen") ||
-      strstr(card->name, "Gen 4")) {
-    gtk_widget_add_css_class(top, "gen4");
-  } else if (strstr(card->name, "Scarlett")) {
-    gtk_widget_add_css_class(top, "scarlett");
-  } else if (strstr(card->name, "Clarett")) {
-    gtk_widget_add_css_class(top, "clarett");
-  } else if (strstr(card->name, "Vocaster")) {
-    gtk_widget_add_css_class(top, "vocaster");
-  }
+  add_card_style_class(top, card);
 
   gtk_grid_set_spacing(GTK_GRID(top), 15);
 
@@ -2817,6 +2776,8 @@ GtkWidget *create_iface_mixer_main(struct alsa_card *card) {
 
   GtkWidget *configuration = create_configuration_controls(card);
   gtk_window_set_child(GTK_WINDOW(card->window_configuration), configuration);
+
+  create_autogain_window(card);
 
   // create DSP window if DSP controls are available
   if (get_elem_by_name(card->elems, "Line In 1 DSP Capture Switch")) {

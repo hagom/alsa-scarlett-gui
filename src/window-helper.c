@@ -1,8 +1,23 @@
 // SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <string.h>
+
 #include "window-helper.h"
 #include "window-iface.h"
+
+void add_card_style_class(GtkWidget *widget, struct alsa_card *card) {
+  if (strstr(card->name, "4th Gen") ||
+      strstr(card->name, "Gen 4")) {
+    gtk_widget_add_css_class(widget, "gen4");
+  } else if (strstr(card->name, "Scarlett")) {
+    gtk_widget_add_css_class(widget, "scarlett");
+  } else if (strstr(card->name, "Clarett")) {
+    gtk_widget_add_css_class(widget, "clarett");
+  } else if (strstr(card->name, "Vocaster")) {
+    gtk_widget_add_css_class(widget, "vocaster");
+  }
+}
 
 gboolean window_configuration_close_request(GtkWindow *w, gpointer data) {
   struct alsa_card *card = data;

@@ -112,25 +112,8 @@ static void gain_updated(
 
   char s[20];
   char *p = s;
-  float value;
   int min_db = round(elem->min_cdB / 100.0);
-  int max_db = round(elem->max_cdB / 100.0);
-
-  if (elem->dB_type == SND_CTL_TLVT_DB_LINEAR) {
-    value = linear_value_to_db(
-      alsa_value,
-      elem->min_val,
-      elem->max_val,
-      min_db,
-      max_db
-    );
-  } else {
-    value = ((float)(alsa_value - elem->min_val)) * data->scale + (elem->min_cdB / 100.0);
-    if (value > max_db)
-      value = max_db;
-    else if (value < min_db)
-      value = min_db;
-  }
+  float value = alsa_get_elem_dB(elem, alsa_value);
 
   if (data->zero_is_off && value == min_db) {
     p += sprintf(p, "−∞");

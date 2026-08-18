@@ -18,6 +18,7 @@
 #include "routing-lines.h"
 #include "scarlett4-firmware.h"
 #include "update-notice.h"
+#include "window-autogain.h"
 #include "window-iface.h"
 #include "window-mixer.h"
 #include "window-routing.h"
@@ -100,6 +101,12 @@ static void update_window_titles(struct alsa_elem *elem, void *private) {
     g_free(dsp_title);
   }
 
+  if (card->window_autogain) {
+    char *autogain_title = g_strdup_printf("%s - Autogain", title);
+    gtk_window_set_title(GTK_WINDOW(card->window_autogain), autogain_title);
+    g_free(autogain_title);
+  }
+
   g_free(title);
 }
 
@@ -144,6 +151,8 @@ static void cleanup_subwindows(struct alsa_card *card) {
     gtk_window_destroy(GTK_WINDOW(card->window_dsp));
     card->window_dsp = NULL;
   }
+
+  destroy_autogain_window(card);
 }
 
 // Release everything hanging off the main window. The caller must

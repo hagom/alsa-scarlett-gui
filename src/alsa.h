@@ -318,6 +318,7 @@ struct alsa_card {
   GtkWidget          *window_configuration;
   GtkWidget          *window_modal;
   GtkWidget          *window_dsp;
+  GtkWidget          *window_autogain;
   GtkWidget          *window_main_contents;
   GtkWidget          *routing_grid;
   GtkWidget          *mixer_grid;
@@ -392,6 +393,9 @@ struct alsa_card {
 
   // levels timer callback data (for restart_levels_timer)
   void               *levels_data;
+
+  // autogain window state (struct autogain_window in window-autogain.c)
+  void               *autogain_data;
 };
 
 // flags for pending_ui_updates
@@ -420,6 +424,19 @@ void alsa_elem_add_callback(
   AlsaElemCallback *callback,
   void             *data,
   GDestroyNotify    destroy  // cleanup function, NULL if no cleanup needed
+);
+
+/* The element's value in dB, from the element's own dB scaling
+ * information. Elements whose scaling is a straight range report a
+ * value clamped to it; linear-scaled elements convert through
+ * linear_value_to_db().
+ */
+double alsa_get_elem_dB(struct alsa_elem *elem, int value);
+
+// find the routing source for an analogue input by channel number
+struct routing_src *get_analogue_input_src(
+  struct alsa_card *card,
+  int               lr_num
 );
 
 // monitor group queries

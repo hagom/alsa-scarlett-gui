@@ -53,7 +53,9 @@ hold display.
 
 When enabled, the interface listens to the input signal
 and automatically adjusts the gain to achieve optimal
-levels. The target level can be configured in the
+levels. An Autogain window opens showing a spinner while
+the run is in progress, then the result. The target level
+can be configured in the
 [Configuration window](configuration.md).
 
 #### Phantom Power (48V)

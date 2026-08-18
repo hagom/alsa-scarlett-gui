@@ -242,8 +242,52 @@ button.toggle {
   text-shadow: 0 0 5px #00c000, 0 0 15px #00c000;
 }
 
+/* Pulse the button for as long as the device reports autogain running
+   on the channel, as the hardware button does */
+@keyframes autogain-running {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.35;
+  }
+}
+
 .window-frame button.autogain:checked {
   text-shadow: 0 0 5px #0000ff, 0 0 15px #0000ff;
+  animation: autogain-running 0.7s ease-in-out infinite alternate;
+}
+
+/* Autogain window results */
+.window-frame .autogain-listening {
+  color: #ffffff;
+  text-shadow: 0 0 5px #0000ff, 0 0 15px #0000ff;
+}
+
+.window-frame .autogain-success {
+  color: #ffffff;
+  text-shadow: 0 0 5px #00ff00, 0 0 15px #00c000;
+}
+
+.window-frame .autogain-warning {
+  color: #ffffff;
+  text-shadow: 0 0 5px #ffc000, 0 0 15px #c08000;
+}
+
+.window-frame .autogain-error {
+  color: #ffffff;
+  text-shadow: 0 0 5px #ff0000, 0 0 15px #c00000;
+}
+
+/* The instruction to perform only applies while a run is going. Two
+   classes, so this beats the .dim-label the label already carries. */
+.window-frame .autogain-idle {
+  opacity: 0.4;
+}
+
+.window-frame .autogain-gain {
+  color: #ffffff;
+  font-weight: bold;
 }
 
 .window-frame button.speaker-switching-enable:checked {
@@ -304,7 +348,8 @@ button.toggle {
 }
 
 /* orange */
-.window-frame .vocaster button.autogain:checked {
+.window-frame .vocaster button.autogain:checked,
+.window-frame .vocaster .autogain-listening {
   text-shadow: 0 0 5px #ffc000, 0 0 15px #ffc000;
 }
 

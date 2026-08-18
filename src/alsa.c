@@ -5,6 +5,7 @@
 #include <alsa/sound/uapi/tlv.h>
 
 #include "alsa.h"
+#include "db.h"
 #include "scarlett2.h"
 #include "scarlett2-firmware.h"
 #include "scarlett4-firmware.h"
@@ -1170,6 +1171,48 @@ static void get_monitor_groups(struct alsa_card *card) {
     card->monitor_group_select_elem = get_elem_by_name(
       card->elems, "Speaker Switching Alt Playback Switch"
     );
+}
+
+double alsa_get_elem_dB(struct alsa_elem *elem, int value) {
+  int min_db = round(elem->min_cdB / 100.0);
+  int max_db = round(elem->max_cdB / 100.0);
+
+  if (elem->dB_type == SND_CTL_TLVT_DB_LINEAR)
+    return linear_value_to_db(
+      value, elem->min_val, elem->max_val, min_db, max_db
+    );
+
+  if (elem->max_val == elem->min_val)
+    return min_db;
+
+  double scale = (double)(elem->max_cdB - elem->min_cdB) / 100.0 /
+                 (elem->max_val - elem->min_val);
+  double db = (value - elem->min_val) * scale + elem->min_cdB / 100.0;
+
+  if (db > max_db)
+    return max_db;
+  if (db < min_db)
+    return min_db;
+
+  return db;
+}
+
+// find the routing source for an analogue input by channel number
+struct routing_src *get_analogue_input_src(
+  struct alsa_card *card,
+  int               lr_num
+) {
+  for (int i = 0; i < card->routing_srcs->len; i++) {
+    struct routing_src *src = &g_array_index(
+      card->routing_srcs, struct routing_src, i
+    );
+
+    if (src->port_category == PC_HW &&
+        src->hw_type == HW_TYPE_ANALOGUE &&
+        src->lr_num == lr_num)
+      return src;
+  }
+  return NULL;
 }
 
 // Whether the sink is enabled in the given monitor group
