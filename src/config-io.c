@@ -11,6 +11,7 @@
 #include "widget-text-entry.h"
 #include "window-configuration.h"
 #include "window-geometry.h"
+#include "autogain-hold.h"
 #include "config-io.h"
 
 // Key for I/O sub-tab persistence
@@ -336,6 +337,7 @@ static GtkWidget *create_link_button(struct alsa_elem *link_elem) {
   g_signal_connect(link_button, "toggled",
     G_CALLBACK(link_button_toggled), link_elem);
   alsa_elem_add_callback(link_elem, link_button_updated, link_button, NULL);
+  autogain_hold_gui_control(link_button, link_elem->card, link_elem);
 
   int value = alsa_get_elem_value(link_elem);
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(link_button), value != 0);
@@ -437,6 +439,7 @@ struct pair_channel_info {
 struct pair_grid_info {
   struct alsa_elem       *link_elem;
   int                     linked;
+
   struct alsa_elem       *pair_name_elem;
   char                   *pair_label_text;   // freed by add_pair_to_grid
   char                   *pair_placeholder;  // freed by add_pair_to_grid

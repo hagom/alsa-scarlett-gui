@@ -112,6 +112,9 @@ for each. “Cancel” stops a run in progress, putting the gain back to
 what it was; “OK” dismisses the results. Autogain can be run on more
 than one channel at a time, so the window is not modal.
 
+The channel’s other controls are unavailable while its Autogain runs,
+since the interface is setting the gain itself.
+
 #### Safe
 
 ”Safe” mode is a feature that automatically reduces the gain if the

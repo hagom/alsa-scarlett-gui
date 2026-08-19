@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2022-2026 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "autogain-hold.h"
 #include "custom-names.h"
 #include "glow.h"
 #include "gtkhelper.h"
@@ -726,51 +727,72 @@ static struct alsa_elem *get_input_type_elem(struct alsa_elem *elem) {
   return get_elem_by_name(elem->card->elems, name);
 }
 
-// Grey out an input control when the channel's input type doesn't
-// support it. type_mask has bit (1 << type) set for each input type
-// value the control is available for.
-struct input_type_gate {
+// Grey out an input control while the channel's input type doesn't
+// support it, or while autogain has the channel. type_mask has bit
+// (1 << type) set for each input type value the control is available
+// for, and is 0 for a control that every input type has.
+struct input_control_gate {
   struct alsa_elem *input_type_elem;
+  struct alsa_elem *autogain_elem;
   struct alsa_elem *elem;
   GtkWidget        *widget;
   unsigned int      type_mask;
 };
 
-static void input_type_gate_updated(
+static void input_control_gate_updated(
   struct alsa_elem *elem,
   void             *private
 ) {
-  struct input_type_gate *gate = private;
+  struct input_control_gate *gate = private;
+  int available = 1;
 
-  int type = alsa_get_elem_value(gate->input_type_elem);
-  gtk_widget_set_sensitive(
-    gate->widget, !!(gate->type_mask & (1u << type))
-  );
+  if (gate->input_type_elem) {
+    int type = alsa_get_elem_value(gate->input_type_elem);
+
+    available = !!(gate->type_mask & (1u << type));
+  }
+
+  if (gate->autogain_elem && alsa_get_elem_value(gate->autogain_elem))
+    available = 0;
+
+  gtk_widget_set_sensitive(gate->widget, available);
 }
 
-static void input_type_gate_destroy(
+static void input_control_gate_destroy(
   GtkWidget *widget,
   gpointer   user_data
 ) {
-  struct input_type_gate *gate = user_data;
+  struct input_control_gate *gate = user_data;
 
-  alsa_elem_remove_callbacks_by_data(gate->input_type_elem, gate);
+  if (gate->input_type_elem)
+    alsa_elem_remove_callbacks_by_data(gate->input_type_elem, gate);
+  if (gate->autogain_elem)
+    alsa_elem_remove_callbacks_by_data(gate->autogain_elem, gate);
   alsa_elem_remove_callbacks_by_data(gate->elem, gate);
   g_free(gate);
 }
 
-static void gate_input_control_on_type(
+static void gate_input_control(
   GtkWidget        *widget,
   struct alsa_elem *elem,
   unsigned int      type_mask
 ) {
-  struct alsa_elem *input_type_elem = get_input_type_elem(elem);
+  struct alsa_elem *input_type_elem =
+    type_mask ? get_input_type_elem(elem) : NULL;
+  struct alsa_elem *autogain_elem = get_autogain_hold_elem(
+    elem->card, get_num_from_string(elem->name)
+  );
 
-  if (!input_type_elem)
+  // autogain itself stays live, so that a run can be cancelled
+  if (autogain_elem == elem)
+    autogain_elem = NULL;
+
+  if (!input_type_elem && !autogain_elem)
     return;
 
-  struct input_type_gate *gate = g_malloc0(sizeof(*gate));
+  struct input_control_gate *gate = g_malloc0(sizeof(*gate));
   gate->input_type_elem = input_type_elem;
+  gate->autogain_elem = autogain_elem;
   gate->elem = elem;
   gate->widget = widget;
   gate->type_mask = type_mask;
@@ -778,15 +800,20 @@ static void gate_input_control_on_type(
   // also registered on the control's own element, after the widget's
   // own callback, so the gate wins when the widget re-asserts
   // sensitivity from writability
-  alsa_elem_add_callback(
-    input_type_elem, input_type_gate_updated, gate, NULL
-  );
-  alsa_elem_add_callback(elem, input_type_gate_updated, gate, NULL);
+  if (input_type_elem)
+    alsa_elem_add_callback(
+      input_type_elem, input_control_gate_updated, gate, NULL
+    );
+  if (autogain_elem)
+    alsa_elem_add_callback(
+      autogain_elem, input_control_gate_updated, gate, NULL
+    );
+  alsa_elem_add_callback(elem, input_control_gate_updated, gate, NULL);
   g_signal_connect(
-    widget, "destroy", G_CALLBACK(input_type_gate_destroy), gate
+    widget, "destroy", G_CALLBACK(input_control_gate_destroy), gate
   );
 
-  input_type_gate_updated(input_type_elem, gate);
+  input_control_gate_updated(elem, gate);
 }
 
 static void create_input_gain_control(
@@ -797,7 +824,7 @@ static void create_input_gain_control(
   int               column_num
 ) {
   GtkWidget *w = make_gain_alsa_elem(elem, 0, WIDGET_GAIN_TAPER_LINEAR, 1, TRUE);
-  gate_input_control_on_type(w, elem, INPUT_TYPE_MASK_MIC_INST);
+  gate_input_control(w, elem, INPUT_TYPE_MASK_MIC_INST);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 
@@ -838,7 +865,7 @@ static void create_input_autogain_control(
     "best signal level. Progress and the result are shown in the "
     "Autogain window."
   );
-  gate_input_control_on_type(w, elem, INPUT_TYPE_MASK_MIC_INST);
+  gate_input_control(w, elem, INPUT_TYPE_MASK_MIC_INST);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
@@ -858,6 +885,8 @@ static void create_input_safe_control(
     "automatically reducing the gain if the signal is too hot."
   );
 
+  gate_input_control(w, elem, 0);
+
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
 
@@ -871,6 +900,8 @@ static void create_input_level_control(
   gtk_widget_add_css_class(w, "inst");
   gtk_widget_set_hexpand(w, TRUE);
   gtk_widget_set_tooltip_text(w, level_descr);
+
+  gate_input_control(w, elem, 0);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
@@ -888,6 +919,8 @@ static void create_input_input_type_control(
     w,
     "Select which input (Mic, Line, or Inst) to use for this channel."
   );
+
+  gate_input_control(w, elem, 0);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
@@ -1065,6 +1098,8 @@ static void create_input_impedance_control(
     "Select the input impedance for the Mic or Inst input."
   );
 
+  gate_input_control(w, elem, 0);
+
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
 
@@ -1078,6 +1113,8 @@ static void create_input_air_switch_control(
   gtk_widget_add_css_class(w, "air");
   gtk_widget_set_hexpand(w, TRUE);
   gtk_widget_set_tooltip_text(w, air_descr);
+
+  gate_input_control(w, elem, 0);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
@@ -1105,7 +1142,7 @@ static void create_input_air_enum_control(
   gtk_widget_add_css_class(w, "air");
   gtk_widget_set_hexpand(w, TRUE);
   gtk_widget_set_tooltip_text(w, descr);
-  gate_input_control_on_type(w, elem, INPUT_TYPE_MASK_MIC_INST);
+  gate_input_control(w, elem, INPUT_TYPE_MASK_MIC_INST);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
@@ -1150,6 +1187,8 @@ static void create_input_console_switch_control(
     "the effect amount."
   );
 
+  gate_input_control(w, elem, 0);
+
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
 
@@ -1188,11 +1227,13 @@ static void create_input_insert_hpf_control(
       hpf,
       "Enable the high-pass filter for this channel."
     );
-    gate_input_control_on_type(hpf, hpf_elem, INPUT_TYPE_MASK_MIC_INST);
+    gate_input_control(hpf, hpf_elem, INPUT_TYPE_MASK_MIC_INST);
     gtk_box_append(GTK_BOX(box), hpf);
   }
 
   gtk_widget_set_hexpand(box, TRUE);
+  gate_input_control(box, elem, 0);
+
   gtk_grid_attach(GTK_GRID(grid), box, column_num, current_row, 1, 1);
 }
 
@@ -1212,6 +1253,8 @@ static void create_input_drive_switch_control(
     "Enable harmonic drive for this channel."
   );
 
+  gate_input_control(w, elem, 0);
+
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
 
@@ -1225,6 +1268,8 @@ static void create_input_dsp_switch_control(
   gtk_widget_add_css_class(w, "dsp");
   gtk_widget_set_hexpand(w, TRUE);
 //  gtk_widget_set_tooltip_text(w, dsp_descr);
+
+  gate_input_control(w, elem, 0);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
@@ -1240,6 +1285,8 @@ static void create_input_dsp_preset_control(
   gtk_widget_set_hexpand(w, TRUE);
 //  gtk_widget_set_tooltip_text(w, dsp_descr);
 
+  gate_input_control(w, elem, 0);
+
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
 
@@ -1253,6 +1300,8 @@ static void create_input_mute_switch_control(
   gtk_widget_add_css_class(w, "input-mute");
   gtk_widget_set_hexpand(w, TRUE);
 //  gtk_widget_set_tooltip_text(w, dsp_descr);
+
+  gate_input_control(w, elem, 0);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
@@ -1271,6 +1320,8 @@ static void create_input_pad_control(
     "Enabling Pad engages a 10dB attenuator in the channel, giving "
     "you more headroom for very hot signals."
   );
+
+  gate_input_control(w, elem, 0);
 
   gtk_grid_attach(GTK_GRID(grid), w, column_num, current_row, 1, 1);
 }
@@ -1291,6 +1342,8 @@ static void create_input_gain_switch_control(
   );
 
   // ignore current_row, always put it in the first row
+  gate_input_control(w, elem, 0);
+
   gtk_grid_attach(GTK_GRID(grid), w, column_num, 1, 1, 1);
 }
 
@@ -1303,7 +1356,7 @@ static void create_input_phantom_control(
   GtkWidget *w = make_boolean_alsa_elem(elem, "48V", NULL);
   gtk_widget_add_css_class(w, "phantom");
   gtk_widget_set_tooltip_text(w, phantom_descr);
-  gate_input_control_on_type(w, elem, INPUT_TYPE_MASK_MIC);
+  gate_input_control(w, elem, INPUT_TYPE_MASK_MIC);
 
   int from, to;
   get_two_num_from_string(elem->name, &from, &to);
@@ -2084,6 +2137,8 @@ static void create_input_controls(
       gtk_box_append(GTK_BOX(box), link);
       gtk_box_append(GTK_BOX(box), sel2);
       gtk_grid_attach(GTK_GRID(input_grid), box, i - 1, 0, 2, 1);
+
+      autogain_hold_pair_control(link, card, i, hw_link_elem);
 
       i++;
     } else {
