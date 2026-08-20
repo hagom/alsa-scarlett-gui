@@ -348,19 +348,41 @@ static GtkWidget *create_link_button(struct alsa_elem *link_elem) {
   return link_button;
 }
 
+// The widgets of a port row. The link button spans both rows of a
+// pair; the rest hold either the individual channel widgets or the
+// pair widgets, whichever the link state calls for.
+enum port_col {
+  PORT_COL_LINK,
+  PORT_COL_ENABLE,
+  PORT_COL_LABEL,
+  PORT_COL_ENTRY,
+  PORT_COL_COUNT
+};
+
+// Grid column of each widget of a port row
+static const int port_row_cols[PORT_COL_COUNT] = {
+  [PORT_COL_LINK]    = 0,
+  [PORT_COL_ENABLE]  = 1,
+  [PORT_COL_LABEL]   = 2,
+  [PORT_COL_ENTRY]   = 3
+};
+
+// Fixed mixer input rows have no link button and no name entry, so
+// their columns close up. An empty column between two occupied ones
+// would still take up the grid's column spacing.
+static const int fixed_mixer_row_cols[PORT_COL_COUNT] = {
+  [PORT_COL_LINK]    = -1,
+  [PORT_COL_ENABLE]  = 0,
+  [PORT_COL_LABEL]   = 1,
+  [PORT_COL_ENTRY]   = -1
+};
+
 // Structure to track widgets for a linkable pair (for visibility toggling)
 // When linked: show pair widgets, hide individual channel widgets
 // When unlinked: show individual channel widgets, hide pair widgets
 struct pair_visibility_data {
-  GtkWidget *ch1_enable;   // First channel enable checkbox
-  GtkWidget *ch1_label;    // First channel label
-  GtkWidget *ch1_entry;    // First channel name entry
-  GtkWidget *ch2_enable;   // Second channel enable checkbox
-  GtkWidget *ch2_label;    // Second channel label
-  GtkWidget *ch2_entry;    // Second channel name entry
-  GtkWidget *pair_enable;  // Pair enable checkbox (spans both rows)
-  GtkWidget *pair_label;   // Pair label (spans both rows)
-  GtkWidget *pair_entry;   // Pair name entry (spans both rows)
+  GtkWidget *ch[2][PORT_COL_COUNT];  // Individual channel widgets
+  GtkWidget *pair[PORT_COL_COUNT];   // Pair widgets (span both rows)
 
   // For mixer/DSP input pairs: data to update pair label text on link change
   struct alsa_card   *card;
@@ -370,27 +392,40 @@ struct pair_visibility_data {
 
 // Set visibility for pair widgets based on linked state
 static void set_pair_visibility(struct pair_visibility_data *pv, int linked) {
-  // Individual channels: hidden when linked, shown when unlinked
-  if (pv->ch1_enable)
-    gtk_widget_set_visible(pv->ch1_enable, !linked);
-  if (pv->ch1_label)
-    gtk_widget_set_visible(pv->ch1_label, !linked);
-  if (pv->ch1_entry)
-    gtk_widget_set_visible(pv->ch1_entry, !linked);
-  if (pv->ch2_enable)
-    gtk_widget_set_visible(pv->ch2_enable, !linked);
-  if (pv->ch2_label)
-    gtk_widget_set_visible(pv->ch2_label, !linked);
-  if (pv->ch2_entry)
-    gtk_widget_set_visible(pv->ch2_entry, !linked);
+  for (int col = 0; col < PORT_COL_COUNT; col++) {
+    // Individual channels: hidden when linked, shown when unlinked
+    for (int c = 0; c < 2; c++)
+      if (pv->ch[c][col])
+        gtk_widget_set_visible(pv->ch[c][col], !linked);
 
-  // Pair widgets: shown when linked, hidden when unlinked
-  if (pv->pair_enable)
-    gtk_widget_set_visible(pv->pair_enable, linked);
-  if (pv->pair_label)
-    gtk_widget_set_visible(pv->pair_label, linked);
-  if (pv->pair_entry)
-    gtk_widget_set_visible(pv->pair_entry, linked);
+    // Pair widgets: shown when linked, hidden when unlinked
+    if (pv->pair[col])
+      gtk_widget_set_visible(pv->pair[col], linked);
+  }
+}
+
+// Attach the widgets of one row of a port grid, skipping those the
+// row doesn't use. cols gives each widget's grid column. height is 2
+// for the pair widgets spanning both rows of a pair, which are
+// centred across them.
+static void attach_port_row(
+  GtkWidget  *grid,
+  GtkWidget **widgets,
+  const int  *cols,
+  int         row,
+  int         height
+) {
+  for (int col = 0; col < PORT_COL_COUNT; col++) {
+    if (!widgets[col] || cols[col] < 0)
+      continue;
+
+    if (height > 1)
+      gtk_widget_set_valign(widgets[col], GTK_ALIGN_CENTER);
+
+    gtk_grid_attach(
+      GTK_GRID(grid), widgets[col], cols[col], row, 1, height
+    );
+  }
 }
 
 // Callback when link state changes - update widget visibility and label
@@ -454,78 +489,56 @@ static int add_pair_to_grid(
   struct pair_grid_info       *info,
   struct column_checkbox_data *col_data
 ) {
-  // Link button at column 0, spanning 2 rows
+  struct pair_visibility_data *pv =
+    g_malloc0(sizeof(struct pair_visibility_data));
+
+  // Link button spanning 2 rows, shown whatever the link state
   GtkWidget *link_button = create_link_button(info->link_elem);
-  gtk_grid_attach(GTK_GRID(grid), link_button, 0, row, 1, 2);
+  gtk_grid_attach(
+    GTK_GRID(grid), link_button, port_row_cols[PORT_COL_LINK], row, 1, 2
+  );
 
   // Per-channel widgets (individual view)
-  GtkWidget *ch_enable[2] = {0};
-  GtkWidget *ch_label[2] = {0};
-  GtkWidget *ch_entry[2] = {0};
-
   for (int c = 0; c < 2; c++) {
     struct pair_channel_info *ch = &info->ch[c];
-    int r = row + c;
 
-    ch_enable[c] = create_enable_checkbox(ch->enable_elem);
-    if (ch_enable[c])
-      gtk_grid_attach(GTK_GRID(grid), ch_enable[c], 1, r, 1, 1);
+    pv->ch[c][PORT_COL_ENABLE] = create_enable_checkbox(ch->enable_elem);
 
-    ch_label[c] = gtk_label_new(ch->generic_name);
-    gtk_widget_set_halign(ch_label[c], GTK_ALIGN_START);
-    gtk_grid_attach(GTK_GRID(grid), ch_label[c], 2, r, 1, 1);
+    pv->ch[c][PORT_COL_LABEL] = gtk_label_new(ch->generic_name);
+    gtk_widget_set_halign(pv->ch[c][PORT_COL_LABEL], GTK_ALIGN_START);
     g_free(ch->generic_name);
 
     if (ch->custom_name_elem) {
-      ch_entry[c] = make_text_entry_alsa_elem(ch->custom_name_elem);
-      gtk_widget_set_hexpand(ch_entry[c], TRUE);
+      GtkWidget *entry = make_text_entry_alsa_elem(ch->custom_name_elem);
+      gtk_widget_set_hexpand(entry, TRUE);
       if (ch->placeholder && *ch->placeholder)
-        gtk_entry_set_placeholder_text(
-          GTK_ENTRY(ch_entry[c]), ch->placeholder
-        );
-      gtk_grid_attach(GTK_GRID(grid), ch_entry[c], 3, r, 1, 1);
+        gtk_entry_set_placeholder_text(GTK_ENTRY(entry), ch->placeholder);
+      pv->ch[c][PORT_COL_ENTRY] = entry;
     }
+
+    attach_port_row(grid, pv->ch[c], port_row_cols, row + c, 1);
   }
 
   // Pair widgets (spanning both rows, shown when linked)
-  GtkWidget *pair_enable =
+  pv->pair[PORT_COL_ENABLE] =
     create_enable_checkbox(info->ch[0].enable_elem);
-  if (pair_enable) {
-    gtk_widget_set_valign(pair_enable, GTK_ALIGN_CENTER);
-    gtk_grid_attach(GTK_GRID(grid), pair_enable, 1, row, 1, 2);
-  }
 
-  GtkWidget *pair_label = gtk_label_new(info->pair_label_text);
+  pv->pair[PORT_COL_LABEL] = gtk_label_new(info->pair_label_text);
   g_free(info->pair_label_text);
-  gtk_widget_set_halign(pair_label, GTK_ALIGN_START);
-  gtk_widget_set_valign(pair_label, GTK_ALIGN_CENTER);
-  gtk_grid_attach(GTK_GRID(grid), pair_label, 2, row, 1, 2);
+  gtk_widget_set_halign(pv->pair[PORT_COL_LABEL], GTK_ALIGN_START);
 
-  GtkWidget *pair_entry = NULL;
   if (info->pair_name_elem) {
-    pair_entry = make_text_entry_alsa_elem(info->pair_name_elem);
+    GtkWidget *entry = make_text_entry_alsa_elem(info->pair_name_elem);
     if (info->pair_placeholder)
       gtk_entry_set_placeholder_text(
-        GTK_ENTRY(pair_entry), info->pair_placeholder
+        GTK_ENTRY(entry), info->pair_placeholder
       );
-    gtk_widget_set_hexpand(pair_entry, TRUE);
-    gtk_widget_set_valign(pair_entry, GTK_ALIGN_CENTER);
-    gtk_grid_attach(GTK_GRID(grid), pair_entry, 3, row, 1, 2);
+    gtk_widget_set_hexpand(entry, TRUE);
+    pv->pair[PORT_COL_ENTRY] = entry;
   }
   g_free(info->pair_placeholder);
 
-  // Setup visibility toggling
-  struct pair_visibility_data *pv =
-    g_malloc0(sizeof(struct pair_visibility_data));
-  pv->ch1_enable = ch_enable[0];
-  pv->ch1_label = ch_label[0];
-  pv->ch1_entry = ch_entry[0];
-  pv->ch2_enable = ch_enable[1];
-  pv->ch2_label = ch_label[1];
-  pv->ch2_entry = ch_entry[1];
-  pv->pair_enable = pair_enable;
-  pv->pair_label = pair_label;
-  pv->pair_entry = pair_entry;
+  attach_port_row(grid, pv->pair, port_row_cols, row, 2);
 
   set_pair_visibility(pv, info->linked);
   alsa_elem_add_callback(
@@ -913,32 +926,28 @@ static int add_mixer_snk_pair_to_grid(
   struct alsa_elem *link_elem = get_snk_link_elem(snk_left);
   int linked = is_snk_linked(snk_left);
 
-  // Link button at column 0, spanning 2 rows
+  struct pair_visibility_data *pv =
+    g_malloc0(sizeof(struct pair_visibility_data));
+
+  // Link button spanning 2 rows, shown whatever the link state
   GtkWidget *link_button = create_link_button(link_elem);
-  gtk_grid_attach(GTK_GRID(grid), link_button, 0, row, 1, 2);
+  gtk_grid_attach(
+    GTK_GRID(grid), link_button, port_row_cols[PORT_COL_LINK], row, 1, 2
+  );
 
-  // Individual channel 1 widgets
-  GtkWidget *ch1_enable = create_enable_checkbox(snk_left->enable_elem);
-  if (ch1_enable)
-    gtk_grid_attach(GTK_GRID(grid), ch1_enable, 1, row, 1, 1);
+  // Individual channel widgets
+  struct routing_snk *snks[2] = { snk_left, snk_right };
 
-  GtkWidget *ch1_label = create_mixer_input_label(card, snk_left);
-  gtk_grid_attach(GTK_GRID(grid), ch1_label, 2, row, 1, 1);
+  for (int c = 0; c < 2; c++) {
+    pv->ch[c][PORT_COL_ENABLE] =
+      create_enable_checkbox(snks[c]->enable_elem);
+    pv->ch[c][PORT_COL_LABEL] = create_mixer_input_label(card, snks[c]);
 
-  // Individual channel 2 widgets
-  GtkWidget *ch2_enable = create_enable_checkbox(snk_right->enable_elem);
-  if (ch2_enable)
-    gtk_grid_attach(GTK_GRID(grid), ch2_enable, 1, row + 1, 1, 1);
-
-  GtkWidget *ch2_label = create_mixer_input_label(card, snk_right);
-  gtk_grid_attach(GTK_GRID(grid), ch2_label, 2, row + 1, 1, 1);
+    attach_port_row(grid, pv->ch[c], port_row_cols, row + c, 1);
+  }
 
   // Pair widgets (spanning both rows)
-  GtkWidget *pair_enable = create_enable_checkbox(snk_left->enable_elem);
-  if (pair_enable) {
-    gtk_widget_set_valign(pair_enable, GTK_ALIGN_CENTER);
-    gtk_grid_attach(GTK_GRID(grid), pair_enable, 1, row, 1, 2);
-  }
+  pv->pair[PORT_COL_ENABLE] = create_enable_checkbox(snk_left->enable_elem);
 
   // Pair label shows "Mixer X–Y - Source L / Source R"
   char *pair_label_text = get_mixer_input_pair_label_text(
@@ -947,8 +956,9 @@ static int add_mixer_snk_pair_to_grid(
   GtkWidget *pair_label = gtk_label_new(pair_label_text);
   g_free(pair_label_text);
   gtk_widget_set_halign(pair_label, GTK_ALIGN_START);
-  gtk_widget_set_valign(pair_label, GTK_ALIGN_CENTER);
-  gtk_grid_attach(GTK_GRID(grid), pair_label, 2, row, 1, 2);
+  pv->pair[PORT_COL_LABEL] = pair_label;
+
+  attach_port_row(grid, pv->pair, port_row_cols, row, 2);
 
   // Store reference for stereo link updates
   snk_left->config_io_pair_label = pair_label;
@@ -971,16 +981,6 @@ static int add_mixer_snk_pair_to_grid(
   );
 
   // Setup visibility toggling
-  struct pair_visibility_data *pv = g_malloc0(sizeof(struct pair_visibility_data));
-  pv->ch1_enable = ch1_enable;
-  pv->ch1_label = ch1_label;
-  pv->ch1_entry = NULL;
-  pv->ch2_enable = ch2_enable;
-  pv->ch2_label = ch2_label;
-  pv->ch2_entry = NULL;
-  pv->pair_enable = pair_enable;
-  pv->pair_label = pair_label;
-  pv->pair_entry = NULL;
   pv->card = card;
   pv->snk_left = snk_left;
   pv->snk_right = snk_right;
@@ -1021,29 +1021,22 @@ static int add_fixed_src_pair_to_grid(
 ) {
   int linked = alsa_get_elem_value(src_link_elem);
 
+  struct pair_visibility_data *pv =
+    g_malloc0(sizeof(struct pair_visibility_data));
+
   // Individual channel widgets
-  GtkWidget *ch1_enable = create_enable_checkbox(snk_left->enable_elem);
-  if (ch1_enable)
-    gtk_grid_attach(GTK_GRID(grid), ch1_enable, 0, row, 1, 1);
+  struct routing_snk *snks[2] = { snk_left, snk_right };
 
-  GtkWidget *ch1_label = create_mixer_input_label(card, snk_left);
-  gtk_grid_attach(GTK_GRID(grid), ch1_label, 1, row, 1, 1);
+  for (int c = 0; c < 2; c++) {
+    pv->ch[c][PORT_COL_ENABLE] =
+      create_enable_checkbox(snks[c]->enable_elem);
+    pv->ch[c][PORT_COL_LABEL] = create_mixer_input_label(card, snks[c]);
 
-  GtkWidget *ch2_enable =
-    create_enable_checkbox(snk_right->enable_elem);
-  if (ch2_enable)
-    gtk_grid_attach(GTK_GRID(grid), ch2_enable, 0, row + 1, 1, 1);
-
-  GtkWidget *ch2_label = create_mixer_input_label(card, snk_right);
-  gtk_grid_attach(GTK_GRID(grid), ch2_label, 1, row + 1, 1, 1);
+    attach_port_row(grid, pv->ch[c], fixed_mixer_row_cols, row + c, 1);
+  }
 
   // Pair widgets (spanning both rows)
-  GtkWidget *pair_enable =
-    create_enable_checkbox(snk_left->enable_elem);
-  if (pair_enable) {
-    gtk_widget_set_valign(pair_enable, GTK_ALIGN_CENTER);
-    gtk_grid_attach(GTK_GRID(grid), pair_enable, 0, row, 1, 2);
-  }
+  pv->pair[PORT_COL_ENABLE] = create_enable_checkbox(snk_left->enable_elem);
 
   char *pair_label_text = get_mixer_input_pair_label_text(
     card, snk_left, snk_right
@@ -1051,8 +1044,9 @@ static int add_fixed_src_pair_to_grid(
   GtkWidget *pair_label = gtk_label_new(pair_label_text);
   g_free(pair_label_text);
   gtk_widget_set_halign(pair_label, GTK_ALIGN_START);
-  gtk_widget_set_valign(pair_label, GTK_ALIGN_CENTER);
-  gtk_grid_attach(GTK_GRID(grid), pair_label, 1, row, 1, 2);
+  pv->pair[PORT_COL_LABEL] = pair_label;
+
+  attach_port_row(grid, pv->pair, fixed_mixer_row_cols, row, 2);
 
   // Update pair label when source names change
   struct mixer_input_pair_label_data *pair_label_data =
@@ -1091,14 +1085,6 @@ static int add_fixed_src_pair_to_grid(
   }
 
   // Visibility toggling driven by source link state
-  struct pair_visibility_data *pv =
-    g_malloc0(sizeof(struct pair_visibility_data));
-  pv->ch1_enable = ch1_enable;
-  pv->ch1_label = ch1_label;
-  pv->ch2_enable = ch2_enable;
-  pv->ch2_label = ch2_label;
-  pv->pair_enable = pair_enable;
-  pv->pair_label = pair_label;
   pv->card = card;
   pv->snk_left = snk_left;
   pv->snk_right = snk_right;
@@ -1306,32 +1292,27 @@ static void add_src_names_for_category(
       // This is the right channel - skip (already handled with its partner)
       continue;
     } else {
-      // No partner - add as single channel (column 0 is empty for consistency)
+      // No partner - add as single channel (the link column is empty
+      // for consistency)
       char *generic_name = get_src_generic_name(src);
       const char *device_default = get_device_port_name(
         src->card->pid, src->port_category, src->hw_type, 0, src->port_num
       );
+      GtkWidget *widgets[PORT_COL_COUNT] = {0};
 
-      // Enable checkbox at column 1
-      if (src->enable_elem) {
-        GtkWidget *checkbox = create_enable_checkbox(src->enable_elem);
-        if (checkbox)
-          gtk_grid_attach(GTK_GRID(grid), checkbox, 1, row, 1, 1);
-      }
+      widgets[PORT_COL_ENABLE] = create_enable_checkbox(src->enable_elem);
 
-      // Label at column 2
-      GtkWidget *label = gtk_label_new(generic_name);
-      gtk_widget_set_halign(label, GTK_ALIGN_START);
-      gtk_grid_attach(GTK_GRID(grid), label, 2, row, 1, 1);
+      widgets[PORT_COL_LABEL] = gtk_label_new(generic_name);
+      gtk_widget_set_halign(widgets[PORT_COL_LABEL], GTK_ALIGN_START);
+      g_free(generic_name);
 
-      // Entry at column 3
       GtkWidget *entry = make_text_entry_alsa_elem(src->custom_name_elem);
       gtk_widget_set_hexpand(entry, TRUE);
       if (device_default && *device_default)
         gtk_entry_set_placeholder_text(GTK_ENTRY(entry), device_default);
-      gtk_grid_attach(GTK_GRID(grid), entry, 3, row, 1, 1);
+      widgets[PORT_COL_ENTRY] = entry;
 
-      g_free(generic_name);
+      attach_port_row(grid, widgets, port_row_cols, row, 1);
 
       // register with column checkbox if available
       if (col_data && src->enable_elem) {
@@ -1383,33 +1364,28 @@ static void add_snk_names_for_category(
       // This is the right channel - skip (already handled with its partner)
       continue;
     } else {
-      // No partner - add as single channel (column 0 is empty for consistency)
+      // No partner - add as single channel (the link column is empty
+      // for consistency)
       char *generic_name = get_snk_generic_name(snk);
       const char *device_default = get_device_port_name(
         snk->elem->card->pid, snk->elem->port_category,
         snk->elem->hw_type, 1, snk->elem->port_num
       );
+      GtkWidget *widgets[PORT_COL_COUNT] = {0};
 
-      // Enable checkbox at column 1
-      if (snk->enable_elem) {
-        GtkWidget *checkbox = create_enable_checkbox(snk->enable_elem);
-        if (checkbox)
-          gtk_grid_attach(GTK_GRID(grid), checkbox, 1, row, 1, 1);
-      }
+      widgets[PORT_COL_ENABLE] = create_enable_checkbox(snk->enable_elem);
 
-      // Label at column 2
-      GtkWidget *label = gtk_label_new(generic_name);
-      gtk_widget_set_halign(label, GTK_ALIGN_START);
-      gtk_grid_attach(GTK_GRID(grid), label, 2, row, 1, 1);
+      widgets[PORT_COL_LABEL] = gtk_label_new(generic_name);
+      gtk_widget_set_halign(widgets[PORT_COL_LABEL], GTK_ALIGN_START);
+      g_free(generic_name);
 
-      // Entry at column 3
       GtkWidget *entry = make_text_entry_alsa_elem(snk->custom_name_elem);
       gtk_widget_set_hexpand(entry, TRUE);
       if (device_default && *device_default)
         gtk_entry_set_placeholder_text(GTK_ENTRY(entry), device_default);
-      gtk_grid_attach(GTK_GRID(grid), entry, 3, row, 1, 1);
+      widgets[PORT_COL_ENTRY] = entry;
 
-      g_free(generic_name);
+      attach_port_row(grid, widgets, port_row_cols, row, 1);
 
       // register with column checkbox if available
       if (col_data && snk->enable_elem) {
