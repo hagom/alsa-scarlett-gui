@@ -2323,6 +2323,23 @@ static void create_input_controls(
   (*x)++;
 }
 
+// The mute and dim buttons for the outputs under hardware control
+// share the cell below the master volume dial, sitting side by side at
+// half its width. Mute prepends and dim appends so that the order
+// doesn't depend on which element the loop reaches first.
+static GtkWidget *get_master_button_box(GtkWidget *output_grid) {
+  GtkWidget *box = gtk_grid_get_child_at(GTK_GRID(output_grid), 0, 3);
+
+  if (box)
+    return box;
+
+  box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+  gtk_box_set_homogeneous(GTK_BOX(box), TRUE);
+  gtk_grid_attach(GTK_GRID(output_grid), box, 0, 3, 1, 1);
+
+  return box;
+}
+
 // Output strips: rows 1-5 of the output grid (monitor group label,
 // volume, mute, SW/HW). Pairs collapse on the GUI stereo link with
 // volume, mute, and SW/HW ganged in software, since the device has no
@@ -2617,7 +2634,7 @@ static void create_output_controls(
       );
       gtk_widget_add_css_class(w, "mute");
       gtk_widget_set_tooltip_text(w, "Mute HW controlled outputs");
-      gtk_grid_attach(GTK_GRID(output_grid), w, 0, 3, 1, 1);
+      gtk_box_prepend(GTK_BOX(get_master_button_box(output_grid)), w);
     } else if (strcmp(elem->name, "Dim Playback Switch") == 0) {
       w = make_boolean_alsa_elem(
         elem, "*audio-volume-medium", "*audio-volume-low"
@@ -2626,7 +2643,7 @@ static void create_output_controls(
       gtk_widget_set_tooltip_text(
         w, "Dim (lower volume) of HW controlled outputs"
       );
-      gtk_grid_attach(GTK_GRID(output_grid), w, 0, 4, 1, 1);
+      gtk_box_append(GTK_BOX(get_master_button_box(output_grid)), w);
     } else if (strcmp(elem->name, "Speaker Mute Playback Switch") == 0) {
       w = make_boolean_alsa_elem(
         elem, "*audio-volume-high", "*audio-volume-muted"
