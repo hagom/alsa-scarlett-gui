@@ -1625,6 +1625,12 @@ struct io_strip {
   GtkWidget          *box;       // row-0 shared pair box (inputs), or NULL
   GtkWidget          *head_l;    // row-0 channel widget, left
   GtkWidget          *head_r;    // row-0 channel widget, right
+
+  // the label within each head carrying the channel name, which is the
+  // head itself unless it is a box holding the output's tag as well;
+  // NULL when the head isn't a label (inputs)
+  GtkWidget          *head_label_l;
+  GtkWidget          *head_label_r;
   GtkWidget          *link_widget;   // chain-icon device link toggle, or NULL
   struct alsa_elem   *hw_link_elem;  // device link, NULL if none
   struct alsa_elem   *gui_link_elem; // GUI link, NULL if not a linkable pair
@@ -1859,22 +1865,22 @@ static void io_strip_updated(struct alsa_elem *elem, void *private) {
 
     // number labels show custom names, the pair range when
     // collapsed, or the channel number
-    if (GTK_IS_LABEL(d->head_l)) {
+    if (d->head_label_l) {
       char *text = gui_linked
         ? output_pair_label_text(d->snk_l, d->num_l)
         : output_channel_label_text(d->snk_l, d->num_l);
 
-      gtk_label_set_text(GTK_LABEL(d->head_l), text);
+      gtk_label_set_text(GTK_LABEL(d->head_label_l), text);
       g_free(text);
     }
   }
   if (d->head_r) {
     gtk_widget_set_visible(d->head_r, show_head_r);
 
-    if (GTK_IS_LABEL(d->head_r)) {
+    if (d->head_label_r) {
       char *text = output_channel_label_text(d->snk_r, d->num_l + 1);
 
-      gtk_label_set_text(GTK_LABEL(d->head_r), text);
+      gtk_label_set_text(GTK_LABEL(d->head_label_r), text);
       g_free(text);
     }
   }
@@ -2340,10 +2346,23 @@ static GtkWidget *get_master_button_box(GtkWidget *output_grid) {
   return box;
 }
 
-// Output strips: rows 1-5 of the output grid (monitor group label,
-// volume, mute, SW/HW). Pairs collapse on the GUI stereo link with
-// volume, mute, and SW/HW ganged in software, since the device has no
-// output link switch.
+// An output's heading is wrapped in a box with its tag below it when
+// it has one, so the label carrying the channel name is either the
+// grid child or the first widget inside it.
+static GtkWidget *get_head_label(GtkWidget *head) {
+  if (GTK_IS_LABEL(head))
+    return head;
+
+  if (GTK_IS_BOX(head))
+    return gtk_widget_get_first_child(head);
+
+  return NULL;
+}
+
+// Output strips: rows 2-5 of the output grid (volume and the mute
+// buttons); the heading and its tag share row 0. Pairs collapse on the
+// GUI stereo link with volume, mute, and SW/HW ganged in software,
+// since the device has no output link switch.
 static void setup_output_strips(
   struct alsa_card  *card,
   GtkWidget         *grid,
@@ -2367,6 +2386,8 @@ static void setup_output_strips(
     d->head_l = gtk_grid_get_child_at(GTK_GRID(grid), col, 0);
     d->head_r =
       is_pair ? gtk_grid_get_child_at(GTK_GRID(grid), col + 1, 0) : NULL;
+    d->head_label_l = get_head_label(d->head_l);
+    d->head_label_r = get_head_label(d->head_r);
     d->gui_link_elem = is_pair ? snk_l->link_elem : NULL;
     d->enable_l = snk_l ? snk_l->enable_elem : NULL;
     d->enable_r = is_pair ? snk_r->enable_elem : NULL;
@@ -2374,7 +2395,7 @@ static void setup_output_strips(
     d->snk_r = is_pair ? snk_r : NULL;
     d->num_l = i;
 
-    for (int row = 1; row <= 5; row++) {
+    for (int row = 2; row <= 5; row++) {
       g_ptr_array_add(
         d->left, gtk_grid_get_child_at(GTK_GRID(grid), col, row)
       );
@@ -2673,14 +2694,41 @@ static void create_output_controls(
     }
   }
 
-  // Add the monitor group / hardware volume knob tag for each output
-  for (int i = 0; i < output_count; i++) {
-    GtkWidget *label = create_output_tag_label(card, i + 1);
-    if (label) {
-      gtk_grid_attach(
-        GTK_GRID(output_grid), label, i + line_1_col, 1, 1, 1
-      );
-    }
+  /* Add the monitor group / hardware volume knob tag for each output,
+   * in a box below the output's heading rather than in a row of its
+   * own, which would put the grid's row spacing above and below it.
+   * Top-aligning every heading keeps them on one line with the tags
+   * hanging below.
+   */
+  for (int col = 0; col < line_1_col + output_count; col++) {
+    GtkWidget *heading =
+      gtk_grid_get_child_at(GTK_GRID(output_grid), col, 0);
+
+    if (!heading)
+      continue;
+
+    gtk_widget_set_valign(heading, GTK_ALIGN_START);
+
+    // the columns before the outputs hold the master and headphone
+    // dials, which are in no monitor group
+    int lr_num = col - line_1_col + 1;
+    GtkWidget *tag =
+      lr_num >= 1 ? create_output_tag_label(card, lr_num) : NULL;
+
+    if (!tag)
+      continue;
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
+    gtk_widget_set_valign(box, GTK_ALIGN_START);
+
+    g_object_ref(heading);
+    gtk_grid_remove(GTK_GRID(output_grid), heading);
+    gtk_box_append(GTK_BOX(box), heading);
+    g_object_unref(heading);
+
+    gtk_box_append(GTK_BOX(box), tag);
+    gtk_grid_attach(GTK_GRID(output_grid), box, col, 0, 1, 1);
   }
 
   setup_output_strips(
