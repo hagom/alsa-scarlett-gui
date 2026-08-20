@@ -78,6 +78,12 @@ When disabled (Off):
 outputs after disabling speaker switching if you want to hear
 something again.
 
+While speaker switching is enabled, the analogue output controls mark
+outputs 1–2 “Main” and 3–4 “Alt” above their volume dials, with the
+selected pair highlighted and the other dimmed. These tags replace the
+“HW” tag on those outputs, which the device locks to the knob while
+speaker switching is on.
+
 #### Talkback (Scarlett 3rd Gen 18i20 only)
 
 Talkback lets you add another channel (usually the talkback mic) to a

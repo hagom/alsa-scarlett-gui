@@ -502,20 +502,55 @@ struct output_tag_label_data {
   struct alsa_elem   *hw_vol_elem;
 };
 
+// A speaker switching device has no monitor group controls: its groups
+// are fixed, analogue outputs 1-2 Main and 3-4 Alt, and the selection
+// is the speaker switching setting (Off, Main, Alt).
+static const char *speaker_switching_group_names[] = { "Main", "Alt" };
+
+static struct alsa_elem *get_speaker_switching_elem(struct alsa_card *card) {
+  return get_elem_by_name(card->elems, "Speaker Switching Playback Enum");
+}
+
+// The fixed group of an output, or -1 if it isn't in one
+static int snk_speaker_switching_group(struct routing_snk *snk) {
+  int lr_num = snk->elem->lr_num;
+
+  if (lr_num <= 2)
+    return 0;
+  if (lr_num <= 4)
+    return 1;
+
+  return -1;
+}
+
 // Update an output's tag: the monitor group it belongs to, or "HW"
-// while the hardware volume knob controls it
+// while the hardware volume knob controls it. A grouped output on a
+// speaker switching device is locked to the knob by the device, so the
+// group name is the more informative of the two.
 static void update_output_tag_label(
   struct alsa_elem *elem,
   void             *data
 ) {
   struct output_tag_label_data *d = data;
   struct alsa_card *card = d->snk->elem->card;
+  struct alsa_elem *speaker_switching = get_speaker_switching_elem(card);
 
   int         group = -1;   // group the label names
   int         selected = 0; // whether that group is the selected one
   const char *name = NULL;
 
-  if (snk_in_any_monitor_group(d->snk)) {
+  if (speaker_switching) {
+    int selection = alsa_get_elem_value(speaker_switching);
+
+    group = snk_speaker_switching_group(d->snk);
+
+    // While speaker switching is off the outputs aren't being used as
+    // switched speaker pairs, so they have no group to report
+    if (group >= 0 && selection) {
+      selected = selection - 1 == group;
+      name = speaker_switching_group_names[group];
+    }
+  } else if (snk_in_any_monitor_group(d->snk)) {
     int active = get_active_monitor_group(card);
 
     if (active >= 0 && snk_in_monitor_group(d->snk, active)) {
@@ -564,10 +599,15 @@ static GtkWidget *create_output_tag_label(
   if (!snk)
     return NULL;
 
+  struct alsa_elem *speaker_switching = get_speaker_switching_elem(card);
   struct alsa_elem *hw_vol_elem = get_hw_vol_elem(card, lr_num);
 
   // Check if this output has anything to report
-  if (!snk->monitor_groups[0].enable && !hw_vol_elem)
+  int in_group = speaker_switching
+    ? snk_speaker_switching_group(snk) >= 0
+    : !!snk->monitor_groups[0].enable;
+
+  if (!in_group && !hw_vol_elem)
     return NULL;
 
   // Create label widget
@@ -582,6 +622,11 @@ static GtkWidget *create_output_tag_label(
   data->hw_vol_elem = hw_vol_elem;
 
   // Register callbacks on all relevant controls
+  if (speaker_switching)
+    alsa_elem_add_callback(
+      speaker_switching, update_output_tag_label, data, NULL
+    );
+
   if (hw_vol_elem)
     alsa_elem_add_callback(
       hw_vol_elem, update_output_tag_label, data, NULL
