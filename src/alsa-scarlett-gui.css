@@ -531,10 +531,11 @@ button.toggle {
   border-color: #303030;
 }
 
-/* Dim button */
+/* Dim button: amber in both states so that it doesn't read as a
+   second mute button beside the one it shares a cell with */
 .window-frame button.dim {
   color: #ffffff;
-  -gtk-icon-shadow: 0 0 5px #00c000, 0 0 15px #00c000;
+  -gtk-icon-shadow: 0 0 5px #503c00, 0 0 15px #503c00;
   border-color: #404040;
 }
 
