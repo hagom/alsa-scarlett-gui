@@ -34,10 +34,12 @@
 #define PID_SCARLETT_GEN4_18I20  0x821d
 #define PID_ISA_C8X              0x821e
 
-// Supported devices
+// Every device the GUI recognises, split into the series it belongs to
+// and the model within that series
 struct scarlett2_device {
   int         pid;
-  const char *name;
+  const char *series;
+  const char *model;
 };
 
 struct scarlett2_device *get_device_for_pid(int pid);

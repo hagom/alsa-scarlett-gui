@@ -1796,6 +1796,7 @@ static void alsa_get_usbid(struct alsa_card *card) {
     return;
   }
 
+  card->vid = vid;
   card->pid = pid;
 }
 

@@ -274,6 +274,10 @@ struct alsa_elem {
 struct alsa_card {
   int                 num;
   char               *device;
+
+  // USB vendor and product IDs, both zero if the card isn't a USB
+  // device the GUI recognises
+  uint32_t            vid;
   uint32_t            pid;
   char               *serial;
   char               *name;
