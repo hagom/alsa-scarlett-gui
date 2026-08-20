@@ -417,6 +417,7 @@ int get_max_elem_by_name(
   const char *prefix,
   const char *needle
 );
+struct alsa_elem *get_hw_vol_elem(struct alsa_card *card, int lr_num);
 
 // add callback to alsa_elem callback list
 void alsa_elem_add_callback(

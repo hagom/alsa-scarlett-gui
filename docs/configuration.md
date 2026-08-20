@@ -120,6 +120,18 @@ as placeholder text. The placeholder shows device-specific
 names where available (e.g., "Mic 1", "Line 3") or generic
 names otherwise.
 
+### Hardware Volume Knob
+
+On the Scarlett 2nd Gen 18i20, 3rd Gen 18i8, 3rd Gen 18i20, and
+the Clarett interfaces, each analogue output row has a speaker
+button. Turn it on to take that output's volume from the big
+volume knob on the front of the interface; turn it off to use
+the output's own volume dial in the main window.
+
+An output following the knob also follows the global mute and
+dim buttons, and its own volume dial and mute button in the
+main window are disabled.
+
 ### Mixer Sub-Tab
 
 The Mixer sub-tab configures mixer inputs and outputs. The

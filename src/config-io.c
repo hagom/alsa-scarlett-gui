@@ -8,6 +8,7 @@
 #include "custom-names.h"
 #include "device-port-names.h"
 #include "stereo-link.h"
+#include "widget-boolean.h"
 #include "widget-text-entry.h"
 #include "window-configuration.h"
 #include "window-geometry.h"
@@ -354,6 +355,7 @@ static GtkWidget *create_link_button(struct alsa_elem *link_elem) {
 enum port_col {
   PORT_COL_LINK,
   PORT_COL_ENABLE,
+  PORT_COL_HW_VOL,
   PORT_COL_LABEL,
   PORT_COL_ENTRY,
   PORT_COL_COUNT
@@ -363,16 +365,19 @@ enum port_col {
 static const int port_row_cols[PORT_COL_COUNT] = {
   [PORT_COL_LINK]    = 0,
   [PORT_COL_ENABLE]  = 1,
-  [PORT_COL_LABEL]   = 2,
-  [PORT_COL_ENTRY]   = 3
+  [PORT_COL_HW_VOL]  = 2,
+  [PORT_COL_LABEL]   = 3,
+  [PORT_COL_ENTRY]   = 4
 };
 
-// Fixed mixer input rows have no link button and no name entry, so
-// their columns close up. An empty column between two occupied ones
-// would still take up the grid's column spacing.
+// Fixed mixer input rows have no link button, no hardware volume
+// button, and no name entry, so their columns close up. An empty
+// column between two occupied ones would still take up the grid's
+// column spacing.
 static const int fixed_mixer_row_cols[PORT_COL_COUNT] = {
   [PORT_COL_LINK]    = -1,
   [PORT_COL_ENABLE]  = 0,
+  [PORT_COL_HW_VOL]  = -1,
   [PORT_COL_LABEL]   = 1,
   [PORT_COL_ENTRY]   = -1
 };
@@ -462,10 +467,39 @@ static GtkWidget *create_enable_checkbox(struct alsa_elem *enable_elem) {
   return checkbox;
 }
 
+// The hardware volume knob element of an analogue output, or NULL for
+// any other port
+static struct alsa_elem *get_snk_hw_vol_elem(struct routing_snk *snk) {
+  struct alsa_elem *elem = snk->elem;
+
+  if (elem->port_category != PC_HW || elem->hw_type != HW_TYPE_ANALOGUE)
+    return NULL;
+
+  return get_hw_vol_elem(elem->card, elem->lr_num);
+}
+
+// Create the button putting an analogue output under the control of
+// the hardware volume knob
+static GtkWidget *create_hw_vol_button(struct alsa_elem *hw_vol_elem) {
+  GtkWidget *button =
+    make_boolean_alsa_elem(hw_vol_elem, "*speaker", "*speaker");
+
+  gtk_widget_add_css_class(button, "hw-vol");
+  gtk_widget_set_halign(button, GTK_ALIGN_CENTER);
+  gtk_widget_set_tooltip_text(
+    button,
+    "Take this output’s volume from the hardware volume knob, rather "
+    "than from its own volume control in the main window."
+  );
+
+  return button;
+}
+
 // Pre-extracted channel info for add_pair_to_grid
 struct pair_channel_info {
   struct alsa_elem *enable_elem;
   struct alsa_elem *custom_name_elem;
+  struct alsa_elem *hw_vol_elem;
   char             *generic_name;   // freed by add_pair_to_grid
   const char       *placeholder;    // device port name, not freed
 };
@@ -516,6 +550,9 @@ static int add_pair_to_grid(
       pv->ch[c][PORT_COL_ENTRY] = entry;
     }
 
+    if (ch->hw_vol_elem)
+      pv->ch[c][PORT_COL_HW_VOL] = create_hw_vol_button(ch->hw_vol_elem);
+
     attach_port_row(grid, pv->ch[c], port_row_cols, row + c, 1);
   }
 
@@ -537,6 +574,12 @@ static int add_pair_to_grid(
     pv->pair[PORT_COL_ENTRY] = entry;
   }
   g_free(info->pair_placeholder);
+
+  // The pair's button writes the left channel's element; the right
+  // channel follows it while the pair is linked
+  if (info->ch[0].hw_vol_elem)
+    pv->pair[PORT_COL_HW_VOL] =
+      create_hw_vol_button(info->ch[0].hw_vol_elem);
 
   attach_port_row(grid, pv->pair, port_row_cols, row, 2);
 
@@ -615,6 +658,7 @@ static void fill_snk_pair_info(
     struct alsa_elem *elem = snks[c]->elem;
     info->ch[c].enable_elem = snks[c]->enable_elem;
     info->ch[c].custom_name_elem = snks[c]->custom_name_elem;
+    info->ch[c].hw_vol_elem = get_snk_hw_vol_elem(snks[c]);
     info->ch[c].generic_name = get_snk_generic_name(snks[c]);
     info->ch[c].placeholder = get_device_port_name(
       elem->card->pid, elem->port_category,
@@ -1385,6 +1429,10 @@ static void add_snk_names_for_category(
         gtk_entry_set_placeholder_text(GTK_ENTRY(entry), device_default);
       widgets[PORT_COL_ENTRY] = entry;
 
+      struct alsa_elem *hw_vol_elem = get_snk_hw_vol_elem(snk);
+      if (hw_vol_elem)
+        widgets[PORT_COL_HW_VOL] = create_hw_vol_button(hw_vol_elem);
+
       attach_port_row(grid, widgets, port_row_cols, row, 1);
 
       // register with column checkbox if available
@@ -2074,11 +2122,21 @@ void add_io_tab(GtkWidget *top_notebook, struct alsa_card *card) {
   GtkWidget *io_tab_content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
   gtk_widget_set_margin_top(io_tab_content, 20);
 
-  gtk_box_append(GTK_BOX(io_tab_content), config_help_label(
-    "Use the checkboxes to hide unused inputs and outputs from the display.\n"
+  const char *hw_vol_help =
+    get_elem_by_substr(card->elems, "Volume Control Playback Enum")
+      ? "\nUse the speaker buttons to take an analogue output’s volume "
+        "from the hardware volume knob."
+      : "";
+
+  char *help_text = g_strdup_printf(
+    "Use the checkboxes to hide unused inputs and outputs from the "
+    "display.\n"
     "You can also give each port a custom name to help identify it.\n"
-    "Use the link buttons to pair adjacent channels as stereo."
-  ));
+    "Use the link buttons to pair adjacent channels as stereo.%s",
+    hw_vol_help
+  );
+  gtk_box_append(GTK_BOX(io_tab_content), config_help_label(help_text));
+  g_free(help_text);
 
   gtk_widget_set_vexpand(notebook, TRUE);
   gtk_box_append(GTK_BOX(io_tab_content), notebook);

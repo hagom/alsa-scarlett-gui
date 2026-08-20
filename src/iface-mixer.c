@@ -495,56 +495,68 @@ static void setup_output_volume_monitor_group(
   gtk_widget_set_sensitive(widget, !snk_in_any_monitor_group(snk));
 }
 
-// Structure to track monitor group label widget
-struct monitor_group_label_data {
+// Structure to track an output's tag widget
+struct output_tag_label_data {
   GtkWidget          *label;
   struct routing_snk *snk;
+  struct alsa_elem   *hw_vol_elem;
 };
 
-// Update monitor group label based on current state
-static void update_monitor_group_label(
+// Update an output's tag: the monitor group it belongs to, or "HW"
+// while the hardware volume knob controls it
+static void update_output_tag_label(
   struct alsa_elem *elem,
   void             *data
 ) {
-  struct monitor_group_label_data *d = data;
+  struct output_tag_label_data *d = data;
   struct alsa_card *card = d->snk->elem->card;
 
-  // If not in any group, hide the label
-  if (!snk_in_any_monitor_group(d->snk)) {
+  int         group = -1;   // group the label names
+  int         selected = 0; // whether that group is the selected one
+  const char *name = NULL;
+
+  if (snk_in_any_monitor_group(d->snk)) {
+    int active = get_active_monitor_group(card);
+
+    if (active >= 0 && snk_in_monitor_group(d->snk, active)) {
+      group = active;
+      selected = 1;
+    } else {
+      for (group = 0; !snk_in_monitor_group(d->snk, group); group++)
+        ;
+    }
+    name = card->monitor_group_names[group];
+  }
+
+  // The selected group: green for Main, red for the Alt groups;
+  // membership of an unselected group: dimmed
+  const char *colour = !selected ? "#666" : group == 0 ? "#4a4" : "#f66";
+
+  // Ungrouped, so report whether the knob controls this output
+  if (!name && d->hw_vol_elem && alsa_get_elem_value(d->hw_vol_elem)) {
+    name = "HW";
+    colour = "#ffc000";
+  }
+
+  if (!name) {
     gtk_label_set_text(GTK_LABEL(d->label), "");
     return;
   }
 
-  int active = get_active_monitor_group(card);
-
-  // Active group membership: green for Main, red for the Alt groups;
-  // membership of an inactive group only: dimmed
-  int group;
-  const char *colour;
-  if (active >= 0 && snk_in_monitor_group(d->snk, active)) {
-    group = active;
-    colour = active == 0 ? "#4a4" : "#f66";
-  } else {
-    for (group = 0; !snk_in_monitor_group(d->snk, group); group++)
-      ;
-    colour = "#666";
-  }
-
   char *markup = g_markup_printf_escaped(
-    "<span color=\"%s\" size=\"small\">%s</span>",
-    colour, card->monitor_group_names[group]
+    "<span color=\"%s\" size=\"small\">%s</span>", colour, name
   );
   gtk_label_set_markup(GTK_LABEL(d->label), markup);
   g_free(markup);
 }
 
-// Free monitor group label data
-static void free_monitor_group_label_data(void *data) {
+// Free output tag data
+static void free_output_tag_label_data(void *data) {
   g_free(data);
 }
 
-// Create monitor group indicator label for an output
-static GtkWidget *create_monitor_group_label(
+// Create the tag shown above an output's volume dial
+static GtkWidget *create_output_tag_label(
   struct alsa_card *card,
   int               lr_num
 ) {
@@ -552,8 +564,10 @@ static GtkWidget *create_monitor_group_label(
   if (!snk)
     return NULL;
 
-  // Check if this output has monitor group controls
-  if (!snk->monitor_groups[0].enable)
+  struct alsa_elem *hw_vol_elem = get_hw_vol_elem(card, lr_num);
+
+  // Check if this output has anything to report
+  if (!snk->monitor_groups[0].enable && !hw_vol_elem)
     return NULL;
 
   // Create label widget
@@ -561,33 +575,39 @@ static GtkWidget *create_monitor_group_label(
   gtk_widget_set_halign(label, GTK_ALIGN_CENTER);
 
   // Create tracking data
-  struct monitor_group_label_data *data =
-    g_malloc(sizeof(struct monitor_group_label_data));
+  struct output_tag_label_data *data =
+    g_malloc(sizeof(struct output_tag_label_data));
   data->label = label;
   data->snk = snk;
+  data->hw_vol_elem = hw_vol_elem;
 
   // Register callbacks on all relevant controls
+  if (hw_vol_elem)
+    alsa_elem_add_callback(
+      hw_vol_elem, update_output_tag_label, data, NULL
+    );
+
   for (int g = 0; g < card->monitor_group_count; g++)
     if (snk->monitor_groups[g].enable)
       alsa_elem_add_callback(
         snk->monitor_groups[g].enable,
-        update_monitor_group_label, data, NULL
+        update_output_tag_label, data, NULL
       );
   if (card->monitor_group_select_elem)
     alsa_elem_add_callback(
       card->monitor_group_select_elem,
-      update_monitor_group_label, data, NULL
+      update_output_tag_label, data, NULL
     );
 
   // Attach cleanup to the widget
   g_object_weak_ref(
     G_OBJECT(label),
-    (GWeakNotify)free_monitor_group_label_data,
+    (GWeakNotify)free_output_tag_label_data,
     data
   );
 
   // Set initial state
-  update_monitor_group_label(NULL, data);
+  update_output_tag_label(NULL, data);
 
   return label;
 }
@@ -2499,19 +2519,12 @@ static void create_output_controls(
         gtk_grid_attach(
           GTK_GRID(output_grid), w, elem->lr_num - 1 + line_1_col, 3, 1, 1
         );
+      // The choice between hardware and software volume control lives
+      // in the I/O configuration; the strip only needs the element so
+      // a linked pair can be ganged
       } else if (strstr(elem->name, "Volume Control Playback Enum")) {
         if (elem->lr_num <= output_count)
           sw_hw_elems[elem->lr_num] = elem;
-        w = make_boolean_alsa_elem(elem, "SW", "HW");
-        gtk_widget_add_css_class(w, "sw-hw");
-        gtk_widget_set_tooltip_text(
-          w,
-          "Set software-controlled (SW) or hardware-controlled (HW) "
-          "volume for this analogue output."
-        );
-        gtk_grid_attach(
-          GTK_GRID(output_grid), w, elem->lr_num - 1 + line_1_col, 4, 1, 1
-        );
       }
 
     // master output controls
@@ -2598,9 +2611,9 @@ static void create_output_controls(
     }
   }
 
-  // Add monitor group indicator labels for each output
+  // Add the monitor group / hardware volume knob tag for each output
   for (int i = 0; i < output_count; i++) {
-    GtkWidget *label = create_monitor_group_label(card, i + 1);
+    GtkWidget *label = create_output_tag_label(card, i + 1);
     if (label) {
       gtk_grid_attach(
         GTK_GRID(output_grid), label, i + line_1_col, 1, 1, 1

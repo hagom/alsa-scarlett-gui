@@ -196,6 +196,22 @@ int get_max_elem_by_name(
   return max;
 }
 
+// The analogue outputs of the largest Scarlett 2nd/3rd Gen and the
+// Clarett interfaces take their volume either from the hardware volume
+// knob or from their own software volume control. Returns the element
+// choosing between them for one output, or NULL if the device has no
+// such control.
+struct alsa_elem *get_hw_vol_elem(struct alsa_card *card, int lr_num) {
+  char name[64];
+
+  snprintf(
+    name, sizeof(name),
+    "Line Out %02d Volume Control Playback Enum", lr_num
+  );
+
+  return get_elem_by_name(card->elems, name);
+}
+
 // add a callback to the list of callbacks for this element
 void alsa_elem_add_callback(
   struct alsa_elem *elem,

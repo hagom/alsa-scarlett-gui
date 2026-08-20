@@ -12,6 +12,7 @@
     <file alias="audio-headphones-symbolic.svg">img/audio-headphones-symbolic.svg</file>
     <file alias="insert.svg">img/insert.svg</file>
     <file alias="hpf.svg">img/hpf.svg</file>
+    <file alias="speaker.svg">img/speaker.svg</file>
     <file alias="link.svg">img/link.svg</file>
     <file alias="link-broken.svg">img/link-broken.svg</file>
   </gresource>

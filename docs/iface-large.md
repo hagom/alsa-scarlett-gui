@@ -163,22 +163,23 @@ your arrow keys, Home/End/PgUp/PgDn keys, or use your mouse scroll
 wheel to adjust. You can also double-click on it to quickly toggle the
 volume between off and 0dB.
 
-The biggest interfaces: Scarlett 2nd Gen 18i20, 3rd Gen 18i8, and 3rd
-Gen 18i20 have a switchable hardware/software volume control. The
-position of the big volume knob on the front of the interface is
-indicated by the “HW” dial in the GUI. The analogue outputs can have
-their volume set either by the knob (“HW” setting of the HW/SW button)
-or by the dials on each output (“SW” setting of the HW/SW button).
+The Scarlett 2nd Gen 18i20, 3rd Gen 18i8, 3rd Gen 18i20, and the
+Clarett interfaces can take an analogue output’s volume either from
+the big volume knob on the front of the interface or from that
+output’s own dial in the GUI. The position of the knob is indicated by
+the “HW” dial. Choose which outputs follow the knob with the speaker
+buttons in the I/O Configuration tab of the Configuration window
+(View → Configuration, or Ctrl-G).
 
-When set to HW, the mute/volume status for those channels is
-controlled by the hardware volume knob and the global dim/mute
-controls and the software volume dial and mute button for those
-channels are disabled.
+While an output follows the knob, its volume and mute are set by the
+knob and by the global dim/mute controls, and its own volume dial and
+mute button are disabled. A “HW” tag above the volume dial marks each
+output the knob controls.
 
 There are “mute” and “dim” (reduce volume) buttons below the “HW” dial
-which affect only the outputs with “HW” control enabled. The 3rd Gen
-18i8 doesn’t have physical buttons or indicator lights for these
-controls, but the 18i20 devices do.
+which affect only the outputs following the knob. The 3rd Gen 18i8
+doesn’t have physical buttons or indicator lights for these controls,
+but the 18i20 devices do.
 
 On the other (smaller) interfaces, the big volume knob on the front of
 the interface controls the volume of the Line 1 and 2 outputs. This is

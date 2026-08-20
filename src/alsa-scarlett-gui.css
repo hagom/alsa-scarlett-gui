@@ -543,17 +543,33 @@ button.toggle {
   border-color: #303030;
 }
 
-/* SW/HW button */
-.window-frame button.sw-hw {
-  color: #ffffff;
-  -gtk-icon-shadow: 0 0 5px #00c000, 0 0 15px #00c000;
+/* Speaker button: analogue output volume from the hardware knob.
+ * The icon carries the state, not the button, so that the frame and
+ * the focus outline match the other buttons.
+ */
+.window-frame button.hw-vol {
   border-color: #404040;
 }
 
-.window-frame button.sw-hw:checked {
-  color: #808080;
-  -gtk-icon-shadow: 0 0 5px #ffc000, 0 0 15px #ffc000;
+.window-frame button.hw-vol > image {
+  opacity: 0.4;
+}
+
+.window-frame button.hw-vol:checked {
   border-color: #303030;
+}
+
+.window-frame button.hw-vol:checked > image {
+  opacity: 1;
+  -gtk-icon-shadow: 0 0 5px #ffc000, 0 0 15px #ffc000;
+}
+
+/* GTK holds a button with an icon child to a wider minimum than one
+ * with a label, which would leave this button wider than the link
+ * button beside it.
+ */
+button.hw-vol {
+  min-width: 0;
 }
 
 /* Textview used for long descriptions in the startup window */
