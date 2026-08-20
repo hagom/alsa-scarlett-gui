@@ -14,6 +14,8 @@ GtkWidget *make_dual_boolean_alsa_elems(
   const char       *label_text,
   const char       *disabled_text_1,
   const char       *enabled_text_1,
+  const char       *css_class_1,
   const char       *disabled_text_2,
-  const char       *enabled_text_2
+  const char       *enabled_text_2,
+  const char       *css_class_2
 );

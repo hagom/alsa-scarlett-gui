@@ -191,7 +191,8 @@ static void add_speaker_switching_controls_enum(
   GtkWidget *w = make_dual_boolean_alsa_elems(
     speaker_switching,
     "Speaker Switching",
-    "Off", "On", "Main", "Alt"
+    "Off", "On", "speaker-switching-enable",
+    "Main", "Alt", "speaker-switching-alt"
   );
 
   gtk_widget_set_tooltip_text(
@@ -607,7 +608,8 @@ static void add_talkback_controls_enum(
   GtkWidget *w = make_dual_boolean_alsa_elems(
     talkback,
     "Talkback",
-    "Disabled", "Enabled", "Off", "On"
+    "Disabled", "Enabled", "talkback-enable",
+    "Off", "On", "talk"
   );
 
   gtk_widget_set_tooltip_text(

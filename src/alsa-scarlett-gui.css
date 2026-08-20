@@ -339,6 +339,14 @@ button.toggle {
   text-shadow: none;
 }
 
+/* On the devices with one three-state control, the Main/Alt button is
+ * disabled while speaker switching is off: neither pair is selected,
+ * so neither colour applies.
+ */
+.window-frame button.speaker-switching-alt:disabled {
+  text-shadow: none;
+}
+
 .window-frame button.talkback-enable:checked {
   text-shadow: 0 0 5px #00c000, 0 0 15px #00c000;
 }

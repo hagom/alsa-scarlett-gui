@@ -55,13 +55,20 @@ GtkWidget *make_dual_boolean_alsa_elems(
   const char       *label_text,
   const char       *disabled_text_1,
   const char       *enabled_text_1,
+  const char       *css_class_1,
   const char       *disabled_text_2,
-  const char       *enabled_text_2
+  const char       *enabled_text_2,
+  const char       *css_class_2
 ) {
   struct dual_button *data = g_malloc(sizeof(struct dual_button));
   data->elem = elem;
   data->button1 = gtk_toggle_button_new();
   data->button2 = gtk_toggle_button_new();
+
+  if (css_class_1)
+    gtk_widget_add_css_class(data->button1, css_class_1);
+  if (css_class_2)
+    gtk_widget_add_css_class(data->button2, css_class_2);
 
   g_signal_connect(
     data->button1, "clicked", G_CALLBACK(dual_button_clicked), data
