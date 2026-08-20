@@ -100,23 +100,30 @@ GtkWidget *make_boolean_alsa_elem(
   data->text[1] = g_strdup(enabled_text);
   load_icons(data);
 
-  // find the maximum width and height of both possible labels
-  int max_width = 0, max_height = 0;
-  for (int i = 0; i < 2; i++) {
-    toggle_button_set_text(data, i);
+  // A button showing the same thing in both states can't change size,
+  // so leave it to size itself. Requesting a size would freeze in
+  // whatever the theme asks for at this point, which the stylesheet
+  // can then no longer change.
+  if (g_strcmp0(data->text[0], data->text[1]) != 0) {
 
-    GtkRequisition *size = gtk_requisition_new();
-    gtk_widget_get_preferred_size(data->button, size, NULL);
+    // find the maximum width and height of both possible labels
+    int max_width = 0, max_height = 0;
+    for (int i = 0; i < 2; i++) {
+      toggle_button_set_text(data, i);
 
-    if (size->width > max_width)
-      max_width = size->width;
-    if (size->height > max_height)
-      max_height = size->height;
+      GtkRequisition *size = gtk_requisition_new();
+      gtk_widget_get_preferred_size(data->button, size, NULL);
+
+      if (size->width > max_width)
+        max_width = size->width;
+      if (size->height > max_height)
+        max_height = size->height;
+    }
+
+    // set the widget minimum size to the maximum label size so that
+    // the widget doesn't change size when the label changes
+    gtk_widget_set_size_request(data->button, max_width, max_height);
   }
-
-  // set the widget minimum size to the maximum label size so that the
-  // widget doesn't change size when the label changes
-  gtk_widget_set_size_request(data->button, max_width, max_height);
 
   toggle_button_updated(elem, data);
 
