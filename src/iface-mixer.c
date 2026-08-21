@@ -579,7 +579,7 @@ static void update_output_tag_label(
   }
 
   char *markup = g_markup_printf_escaped(
-    "<span color=\"%s\" size=\"small\">%s</span>", colour, name
+    "<span color=\"%s\">%s</span>", colour, name
   );
   gtk_label_set_markup(GTK_LABEL(d->label), markup);
   g_free(markup);
@@ -610,9 +610,14 @@ static GtkWidget *create_output_tag_label(
   if (!in_group && !hw_vol_elem)
     return NULL;
 
-  // Create label widget
+  /* Create label widget. The smaller font is a style rather than
+   * markup so that the label is the same height whether or not it has
+   * anything to say; markup would leave an empty one a full-size line
+   * tall.
+   */
   GtkWidget *label = gtk_label_new("");
   gtk_widget_set_halign(label, GTK_ALIGN_CENTER);
+  gtk_widget_add_css_class(label, "output-tag");
 
   // Create tracking data
   struct output_tag_label_data *data =

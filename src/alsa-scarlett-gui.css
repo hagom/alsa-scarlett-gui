@@ -517,6 +517,11 @@ button.toggle {
   color: #808080;
 }
 
+/* The monitor group / hardware volume tag above an output's dial */
+.window-frame label.output-tag {
+  font-size: smaller;
+}
+
 /* Button controls where checked is dimmer */
 
 /* Mute button */
