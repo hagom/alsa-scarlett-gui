@@ -817,8 +817,6 @@ static void alsa_get_elem(struct alsa_card *card, int numid) {
 
   // get the control's info
   alsa_elem.type = alsa_get_elem_type(&alsa_elem);
-  alsa_elem.name = alsa_get_elem_name(&alsa_elem);
-  alsa_elem.count = alsa_get_elem_count(&alsa_elem);
 
   switch (alsa_elem.type) {
     case SND_CTL_ELEM_TYPE_BOOLEAN:
@@ -830,10 +828,14 @@ static void alsa_get_elem(struct alsa_card *card, int numid) {
       return;
   }
 
-  if (strstr(alsa_elem.name, "Validity"))
+  alsa_elem.name = alsa_get_elem_name(&alsa_elem);
+  alsa_elem.count = alsa_get_elem_count(&alsa_elem);
+
+  if (strstr(alsa_elem.name, "Validity") ||
+      strstr(alsa_elem.name, "Channel Map")) {
+    free(alsa_elem.name);
     return;
-  if (strstr(alsa_elem.name, "Channel Map"))
-    return;
+  }
 
   alsa_get_elem_tlv(&alsa_elem);
 
@@ -859,6 +861,14 @@ static void alsa_get_elem(struct alsa_card *card, int numid) {
     struct alsa_elem *elem = malloc(sizeof(struct alsa_elem));
     *elem = alsa_elem;
 
+    // each element owns its own copy of the strings
+    elem->name = strdup(alsa_elem.name);
+    if (alsa_elem.meter_labels) {
+      elem->meter_labels = calloc(alsa_elem.count, sizeof(char *));
+      for (int j = 0; j < alsa_elem.count; j++)
+        elem->meter_labels[j] = strdup(alsa_elem.meter_labels[j]);
+    }
+
     // Initialise value cache for change detection
     if (elem->count == 1)
       elem->value = alsa_get_elem_value(elem);
@@ -866,6 +876,13 @@ static void alsa_get_elem(struct alsa_card *card, int numid) {
       elem->values = alsa_get_elem_int_values(elem);
 
     g_ptr_array_add(card->elems, elem);
+  }
+
+  free(alsa_elem.name);
+  if (alsa_elem.meter_labels) {
+    for (int i = 0; i < alsa_elem.count; i++)
+      free(alsa_elem.meter_labels[i]);
+    free(alsa_elem.meter_labels);
   }
 }
 
