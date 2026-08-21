@@ -1067,8 +1067,13 @@ GtkWidget *create_mixer_controls(struct alsa_card *card) {
   gtk_widget_add_css_class(mixer_overlay, "window-mixer");
   gtk_frame_set_child(GTK_FRAME(top), mixer_overlay);
 
-  // create grid as base child (determines size)
+  /* create grid as base child (determines size)
+   *
+   * The dials sit right up against the edges of their cells, so the
+   * grid has to provide the space between them.
+   */
   GtkWidget *mixer_top = gtk_grid_new();
+  gtk_grid_set_spacing(GTK_GRID(mixer_top), 8);
   gtk_overlay_set_child(GTK_OVERLAY(mixer_overlay), mixer_top);
 
   // create unavailable overlay label (hidden by default)

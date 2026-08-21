@@ -332,17 +332,107 @@ static double calc_val(double valp, double mn, double mx) {
   return (mx - mn) * valp + mn;
 }
 
-static int calculate_dial_height(int width) {
-  double radius = width / 2;
-  double angle = (360 - TOTAL_ROTATION_DEGREES) / 2 * M_PI / 180;
-  double height = radius + radius * cos(angle);
+/* Where the drawing sits relative to the radius: the arcs are stroked
+ * about the slider radius, half the slider thickness inside it, and
+ * the ticks straddle the arcs out to the background radius.
+ */
+#define ARC_RATIO  (1.0 - 1.0 / 2.2 / 2)
+#define TICK_RATIO (ARC_RATIO + 1.0 / 2.2 / 4)
 
-  return ceil(height);
+/* Half the widest stroke drawn on each: the value arc, the level
+ * blur, which is only on the slider arc when there is no value to
+ * show, and a tick.
+ */
+#define ARC_STROKE   2.0
+#define LEVEL_STROKE 3.0
+#define TICK_STROKE  1.0
+
+/* How far, in pixels, the drawing reaches from the centre in each
+ * direction. The arc sweeps through straight up and out to both
+ * sides, so it sets those; below the centre it stops where the sweep
+ * opens out. The ticks, at zero dB and at each end of the sweep,
+ * stick out past the arc but only in their own direction.
+ */
+struct dial_reach {
+  double up, down, side;
+};
+
+static void add_tick_reach(
+  struct dial_reach *reach,
+  double             radius,
+  double             angle
+) {
+  double tick = radius * TICK_RATIO + TICK_STROKE;
+  double x = fabs(cos(angle)) * tick;
+  double y = sin(angle) * tick;
+
+  if (x > reach->side)
+    reach->side = x;
+  if (-y > reach->up)
+    reach->up = -y;
+  if (y > reach->down)
+    reach->down = y;
 }
 
-static double calculate_dial_radius_from_height(int height) {
-  double angle = (360 - TOTAL_ROTATION_DEGREES) / 2.0 * M_PI / 180.0;
-  return height / (1 + cos(angle));
+static struct dial_reach dial_get_reach(GtkDial *dial, double radius) {
+  struct dial_reach reach;
+
+  // the arc the marks are stroked about, and the outermost of them
+  double ring = radius * ARC_RATIO;
+  double arc = ring + ARC_STROKE;
+
+  /* A level-only dial draws a shadow arc half the slider thickness
+   * wide about the background radius, which takes it out to the full
+   * radius on all but the smallest dials.
+   */
+  if (dial->show_level && !dial->show_value) {
+    if (radius > ring + LEVEL_STROKE) {
+      ring = radius * TICK_RATIO;
+      arc = radius;
+    } else {
+      arc = ring + LEVEL_STROKE;
+    }
+  }
+
+  reach.up = arc;
+  reach.side = arc;
+
+  // the sweep's ends, plus the round cap drawn on them
+  reach.down = sin(ANGLE_END) * ring + (arc - ring);
+
+  add_tick_reach(&reach, radius, ANGLE_START);
+  add_tick_reach(&reach, radius, ANGLE_END);
+
+  double zero_db = gtk_dial_get_zero_db(dial);
+
+  // the taper needs the adjustment, which a dial may not have yet
+  if (dial->adj && zero_db != -G_MAXDOUBLE)
+    add_tick_reach(
+      &reach, radius,
+      calc_val(calc_taper(dial, zero_db), ANGLE_START, ANGLE_END)
+    );
+
+  return reach;
+}
+
+/* The largest radius whose drawing fits in the given space. Which
+ * mark is outermost changes with the radius, so close in on it rather
+ * than inverting the reach.
+ */
+static double dial_radius_for_size(GtkDial *dial, double w, double h) {
+  double lo = 0, hi = DIAL_MAX_WIDTH / 2.0;
+
+  for (int i = 0; i < 24; i++) {
+    double mid = (lo + hi) / 2;
+    struct dial_reach reach = dial_get_reach(dial, mid);
+
+    if (reach.side * 2 <= w && reach.up + reach.down <= h)
+      lo = mid;
+    else
+      hi = mid;
+  }
+
+  return lo;
 }
 
 // internal replacement for cairo_pattern_add_color_stop_rgb() that
@@ -380,28 +470,17 @@ static int update_dial_properties(GtkDial *dial) {
   dial->h = height;
   dial->properties_updated = 0;
 
-  // calculate size of dial to fit within the given space
-  if (width > DIAL_MAX_WIDTH)
-    width = DIAL_MAX_WIDTH;
+  /* Fit the drawing to the space by how far it reaches rather than by
+   * its radius, so that the marks touch the edges of the allocation
+   * instead of floating inside it.
+   */
+  dial->radius = dial_radius_for_size(dial, width, height);
 
-  double max_height = calculate_dial_height(DIAL_MAX_WIDTH);
-  if (height > max_height)
-    height = max_height;
+  struct dial_reach reach = dial_get_reach(dial, dial->radius);
 
-  // calculate dial radius
-  double radius_from_width = width / 2;
-  double radius_from_height = calculate_dial_radius_from_height(height);
-
-  dial->radius = radius_from_width < radius_from_height ?
-    radius_from_width : radius_from_height;
-  dial->radius -= 0.5;
-
-  // calculate center of dial
-  double angle = (360 - TOTAL_ROTATION_DEGREES) / 2.0 * M_PI / 180.0;
-  double y_offset = dial->radius * cos(angle);
-
+  // centre what is drawn in whatever space is left over
   dial->cx = dial->w / 2;
-  dial->cy = (dial->h / 2.0) + (dial->radius - y_offset) / 2.0 - 0.5;
+  dial->cy = (dial->h - reach.up - reach.down) / 2.0 + reach.up;
 
   dial->slider_thickness = dial->radius / 2.2;
   dial->knob_radius = dial->radius - dial->slider_thickness;
@@ -837,12 +916,16 @@ static void dial_measure(
   int            *minimum_baseline,
   int            *natural_baseline
 ) {
+  GtkDial *dial = GTK_DIAL(widget);
+  struct dial_reach min = dial_get_reach(dial, DIAL_MIN_WIDTH / 2.0);
+  struct dial_reach max = dial_get_reach(dial, DIAL_MAX_WIDTH / 2.0);
+
   if (orientation == GTK_ORIENTATION_HORIZONTAL) {
-    *minimum = DIAL_MIN_WIDTH;
-    *natural = DIAL_MAX_WIDTH;
+    *minimum = ceil(min.side * 2);
+    *natural = ceil(max.side * 2);
   } else {
-    *minimum = calculate_dial_height(DIAL_MIN_WIDTH);
-    *natural = calculate_dial_height(DIAL_MAX_WIDTH);
+    *minimum = ceil(min.up + min.down);
+    *natural = ceil(max.up + max.down);
   }
   *minimum_baseline = -1;
   *natural_baseline = -1;
@@ -1357,6 +1440,9 @@ void gtk_dial_set_zero_db(GtkDial *dial, double zero_db) {
   dial->zero_db = zero_db;
   dial->properties_updated = 1;
   dial->static_cache_valid = 0;
+
+  // the zero dB tick moves, and with it the size asked for
+  gtk_widget_queue_resize(GTK_WIDGET(dial));
 }
 
 double gtk_dial_get_zero_db(GtkDial *dial) {
@@ -1377,6 +1463,9 @@ void gtk_dial_set_is_linear(GtkDial *dial, gboolean is_linear) {
   dial->is_linear = is_linear;
   dial->properties_updated = 1;
   dial->static_cache_valid = 0;
+
+  // the zero dB tick moves, and with it the size asked for
+  gtk_widget_queue_resize(GTK_WIDGET(dial));
 }
 
 gboolean gtk_dial_get_is_linear(GtkDial *dial) {
@@ -1387,6 +1476,9 @@ void gtk_dial_set_taper(GtkDial *dial, int taper) {
   dial->taper = taper;
   dial->properties_updated = 1;
   dial->static_cache_valid = 0;
+
+  // the zero dB tick moves, and with it the size asked for
+  gtk_widget_queue_resize(GTK_WIDGET(dial));
 }
 
 int gtk_dial_get_taper(GtkDial *dial) {
@@ -1474,7 +1566,9 @@ void gtk_dial_set_show_level(GtkDial *dial, gboolean show_level) {
   dial->show_level = show_level;
   dial->properties_updated = 1;
   dial->static_cache_valid = 0;
-  gtk_widget_queue_draw(GTK_WIDGET(dial));
+
+  // the reach, and so the size asked for, depends on this
+  gtk_widget_queue_resize(GTK_WIDGET(dial));
 }
 
 gboolean gtk_dial_get_show_level(GtkDial *dial) {
@@ -1485,7 +1579,9 @@ void gtk_dial_set_show_value(GtkDial *dial, gboolean show_value) {
   dial->show_value = show_value;
   dial->properties_updated = 1;
   dial->static_cache_valid = 0;
-  gtk_widget_queue_draw(GTK_WIDGET(dial));
+
+  // the reach, and so the size asked for, depends on this
+  gtk_widget_queue_resize(GTK_WIDGET(dial));
 }
 
 gboolean gtk_dial_get_show_value(GtkDial *dial) {
