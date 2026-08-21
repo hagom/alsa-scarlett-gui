@@ -129,6 +129,35 @@
   background: transparent;
 }
 
+/* A row title sits beside its expander's arrow, so it doesn't take
+ * controls-label's negative top margin */
+.meter-row-title {
+  margin-top: 0;
+}
+
+/* Level meter groups */
+.meter-group {
+  padding: 5px;
+}
+
+/* The button standing in for a collapsed group, beside its row title */
+.meter-group-chip {
+  padding: 0 4px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.meter-group-title {
+  font-size: smaller;
+  color: #c0c0c0;
+  padding: 0 2px 2px 2px;
+}
+
+.meter-number {
+  font-size: 0.75em;
+  color: #a0a0a0;
+}
+
 .mixer-corner-label {
   font-size: smaller;
   color: #808080;

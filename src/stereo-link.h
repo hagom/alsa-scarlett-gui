@@ -102,10 +102,22 @@ char *get_snk_generic_pair_name(struct routing_snk *snk);
 // Returns newly allocated string that must be freed
 char *get_src_default_pair_name(struct routing_src *src);
 
+// Headphone number of a sink pair: 1 or more when the device numbers
+// its headphone outputs, 0 for a single unnumbered one, or -1 when the
+// pair is not a headphone output. Line outputs that double as
+// headphone outputs count.
+int get_snk_pair_headphone_num(struct routing_snk *snk);
+
 // Get default pair name for a sink (device-specific or constructed)
 // Used for display in routing window when no custom name is set
 // Returns newly allocated string that must be freed
 char *get_snk_default_pair_name(struct routing_snk *snk);
+
+// The name of the source feeding a sink: the pair name when both the
+// sink and the source are linked, the source's own name otherwise, and
+// NULL when the sink isn't connected to a source.
+// Returns newly allocated string that must be freed
+char *get_snk_source_display_name(struct routing_snk *snk);
 
 // Register talkback sync callback for a mixer output source
 // Called from window-routing.c after talkback_elem is set

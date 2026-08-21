@@ -10,6 +10,7 @@
 #include "stringhelper.h"
 #include "widget-boolean.h"
 #include "window-geometry.h"
+#include "window-levels.h"
 #include "window-mixer.h"
 #include "window-routing.h"
 #include "custom-names.h"
@@ -1638,37 +1639,20 @@ void update_hw_output_label(struct routing_snk *r_snk) {
   // Get the display name (stereo-aware, handles custom names)
   char *base_name = get_snk_stereo_aware_name(r_snk);
 
-  // PCM outputs - check availability based on sample rate
+  // PCM sinks are "PCM Inputs" in routing = capture to PC
   if (elem->port_category == PC_PCM) {
-    // PCM sinks are "PCM Inputs" in routing = capture to PC
-    // port_num is 0-based, capture_channels is count
-    int available = card->pcm_capture_channels == 0 ||
-                    elem->port_num < card->pcm_capture_channels;
-
-    if (!available) {
-      char *markup = g_strdup_printf(
-        "<span color=\"#808080\"><s>%s</s></span>", base_name
-      );
-      gtk_label_set_markup(GTK_LABEL(r_snk->label_widget), markup);
-      gtk_widget_set_tooltip_text(
-        r_snk->label_widget,
-        "Unavailable at current sample rate"
-      );
-      g_free(markup);
-    } else {
-      gtk_label_set_text(GTK_LABEL(r_snk->label_widget), base_name);
-      gtk_label_set_use_markup(GTK_LABEL(r_snk->label_widget), FALSE);
-      gtk_widget_set_tooltip_text(r_snk->label_widget, NULL);
-    }
+    set_availability_label(
+      r_snk->label_widget, base_name, is_routing_snk_available(r_snk),
+      "Unavailable at current sample rate"
+    );
     g_free(base_name);
     return;
   }
 
   // Mixer/DSP sinks - update availability styling
   if (elem->port_category == PC_MIX || elem->port_category == PC_DSP) {
-    int available = get_sample_rate_category(card->current_sample_rate) != SR_HIGH;
     set_availability_label(
-      r_snk->label_widget, base_name, available,
+      r_snk->label_widget, base_name, is_routing_snk_available(r_snk),
       "Mixer unavailable at current sample rate"
     );
     g_free(base_name);
@@ -1684,11 +1668,8 @@ void update_hw_output_label(struct routing_snk *r_snk) {
   // Non-analogue outputs - check S/PDIF and ADAT availability
   if (elem->hw_type != HW_TYPE_ANALOGUE) {
     if (is_digital_io_type(elem->hw_type)) {
-      int max_port = elem->hw_type == HW_TYPE_SPDIF
-        ? card->max_spdif_out : card->max_adat_out;
-      int available = max_port < 0 || elem->lr_num <= max_port;
       set_availability_label(
-        r_snk->label_widget, base_name, available,
+        r_snk->label_widget, base_name, is_routing_snk_available(r_snk),
         "Unavailable with current Digital I/O mode and sample rate"
       );
     } else {
@@ -1737,28 +1718,19 @@ void update_routing_src_label(struct routing_src *r_src) {
     return;
 
   char *name = get_src_stereo_aware_name(r_src);
-  int available = 1;
+  int available = is_routing_src_available(r_src);
   const char *tooltip = NULL;
-  struct alsa_card *card = r_src->card;
 
   switch (r_src->port_category) {
     case PC_MIX:
-      available =
-        get_sample_rate_category(card->current_sample_rate) != SR_HIGH;
       tooltip = "Mixer unavailable at current sample rate";
       break;
     case PC_HW:
-      if (is_digital_io_type(r_src->hw_type)) {
-        int max_port = r_src->hw_type == HW_TYPE_SPDIF
-          ? card->max_spdif_in : card->max_adat_in;
-        available = max_port < 0 || r_src->lr_num <= max_port;
+      if (is_digital_io_type(r_src->hw_type))
         tooltip =
           "Unavailable with current Digital I/O mode and sample rate";
-      }
       break;
     case PC_PCM:
-      available = card->pcm_playback_channels == 0 ||
-                  r_src->port_num < card->pcm_playback_channels;
       tooltip = "Unavailable at current sample rate";
       break;
   }
@@ -1802,6 +1774,8 @@ static void update_mixer_headings(struct alsa_card *card) {
 
 // Update all PCM labels when channel availability changes
 void update_all_pcm_labels(struct alsa_card *card) {
+  update_levels_availability(card);
+
   if (!card->window_routing)
     return;
 
@@ -1826,10 +1800,11 @@ void update_all_pcm_labels(struct alsa_card *card) {
 
 // Update all HW I/O and mixer labels when availability changes
 void update_all_hw_io_labels(struct alsa_card *card) {
+  update_hw_io_limits(card);
+  update_levels_availability(card);
+
   if (!card->window_routing || !card->routing_snks || !card->routing_srcs)
     return;
-
-  update_hw_io_limits(card);
 
   // Update routing sinks
   for (int i = 0; i < card->routing_snks->len; i++) {

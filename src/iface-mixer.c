@@ -2952,7 +2952,10 @@ GtkWidget *create_iface_mixer_main(struct alsa_card *card) {
     card, "Levels", G_CALLBACK(window_levels_close_request)
   );
 
+  // the meters are laid out in fixed rows, so the window is exactly as
+  // big as they are
   gtk_window_set_child(GTK_WINDOW(card->window_levels), levels_top);
+  gtk_window_set_resizable(GTK_WINDOW(card->window_levels), FALSE);
 
   card->window_configuration = create_subwindow(
     card, "Configuration", G_CALLBACK(window_configuration_close_request)

@@ -135,6 +135,32 @@ char *get_snk_default_pair_name(struct routing_snk *snk) {
   return get_snk_generic_pair_name(snk);
 }
 
+int get_snk_pair_headphone_num(struct routing_snk *snk) {
+  char *name = get_snk_default_pair_name(snk);
+
+  if (!name)
+    return -1;
+
+  // a dedicated headphone pair, or a line output pair that also
+  // carries headphone output ("9-10/Headphones 1")
+  const char *hp = strncmp(name, "Headphones", 10) == 0
+    ? name
+    : strstr(name, "/Headphones");
+
+  int num = -1;
+
+  if (hp) {
+    num = get_num_from_string(hp);
+
+    if (num < 0)
+      num = 0;
+  }
+
+  g_free(name);
+
+  return num;
+}
+
 // Find the partner source (the other channel of a stereo pair)
 // Uses cached pointer if available, otherwise searches and caches
 struct routing_src *get_src_partner(struct routing_src *src) {
@@ -1825,6 +1851,26 @@ char *get_snk_pair_display_name(struct routing_snk *snk) {
 
   // Fall back to default pair name (device-specific or constructed)
   return get_snk_default_pair_name(snk_l);
+}
+
+// The name of the source feeding a sink: the pair name when both the
+// sink and the source are linked, the source's own name otherwise, and
+// NULL when the sink isn't connected to a source.
+char *get_snk_source_display_name(struct routing_snk *snk) {
+  struct alsa_card *card = snk->elem->card;
+  int src_idx = snk->effective_source_idx;
+
+  if (src_idx <= 0 || src_idx >= card->routing_srcs->len)
+    return NULL;
+
+  struct routing_src *src = &g_array_index(
+    card->routing_srcs, struct routing_src, src_idx
+  );
+
+  if (is_snk_linked(snk) && is_src_linked(src))
+    return get_src_pair_display_name(src);
+
+  return g_strdup(get_routing_src_display_name(src));
 }
 
 // Get default stereo link state for a pair based on category rules

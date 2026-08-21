@@ -120,3 +120,47 @@ void update_hw_io_limits(struct alsa_card *card) {
   fprintf(stderr, "Unknown Digital I/O config: pid=0x%04x mode=%s sr_cat=%d\n",
           card->pid, mode, sr_cat);
 }
+
+int is_routing_src_available(struct routing_src *r_src) {
+  struct alsa_card *card = r_src->card;
+
+  switch (r_src->port_category) {
+    case PC_MIX:
+      return get_sample_rate_category(card->current_sample_rate) != SR_HIGH;
+    case PC_HW:
+      if (is_digital_io_type(r_src->hw_type)) {
+        int max_port = r_src->hw_type == HW_TYPE_SPDIF
+          ? card->max_spdif_in : card->max_adat_in;
+        return max_port < 0 || r_src->lr_num <= max_port;
+      }
+      return 1;
+    case PC_PCM:
+      return card->pcm_playback_channels == 0 ||
+             r_src->port_num < card->pcm_playback_channels;
+    default:
+      return 1;
+  }
+}
+
+int is_routing_snk_available(struct routing_snk *r_snk) {
+  struct alsa_elem *elem = r_snk->elem;
+  struct alsa_card *card = elem->card;
+
+  switch (elem->port_category) {
+    case PC_MIX:
+    case PC_DSP:
+      return get_sample_rate_category(card->current_sample_rate) != SR_HIGH;
+    case PC_HW:
+      if (is_digital_io_type(elem->hw_type)) {
+        int max_port = elem->hw_type == HW_TYPE_SPDIF
+          ? card->max_spdif_out : card->max_adat_out;
+        return max_port < 0 || elem->lr_num <= max_port;
+      }
+      return 1;
+    case PC_PCM:
+      return card->pcm_capture_channels == 0 ||
+             elem->port_num < card->pcm_capture_channels;
+    default:
+      return 1;
+  }
+}

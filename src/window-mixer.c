@@ -1260,22 +1260,11 @@ void update_mixer_labels(struct alsa_card *card) {
     if (!should_display_snk(r_snk))
       continue;
 
-    int routing_src_idx = alsa_get_elem_value(elem);
-
-    struct routing_src *r_src = &g_array_index(
-      card->routing_srcs, struct routing_src, routing_src_idx
-    );
-
     if (r_snk->mixer_label_top) {
-      char *display_name;
+      char *display_name = get_snk_source_display_name(r_snk);
 
-      // If this mixer input is linked and the connected source is also linked,
-      // show the stereo pair name
-      if (is_snk_linked(r_snk) && is_src_linked(r_src)) {
-        display_name = get_src_pair_display_name(r_src);
-      } else {
-        display_name = g_strdup(get_routing_src_display_name(r_src));
-      }
+      if (!display_name)
+        display_name = g_strdup("Off");
 
       set_rotated_label_text(r_snk->mixer_label_top, display_name);
       set_rotated_label_text(r_snk->mixer_label_bottom, display_name);

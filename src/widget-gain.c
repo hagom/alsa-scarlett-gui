@@ -1,22 +1,12 @@
 // SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "glow.h"
 #include "gtkdial.h"
 #include "stringhelper.h"
 #include "widget-gain.h"
 #include "window-geometry.h"
 #include "db.h"
-
-// level meter colours for gain dials with level display
-static const int level_breakpoints[] = { -80, -18, -12, -6, -3, -1 };
-static const double level_colours[] = {
-  0.00, 1.00, 0.00, // -80
-  0.75, 1.00, 0.00, // -18
-  1.00, 1.00, 0.00, // -12
-  1.00, 0.75, 0.00, //  -6
-  1.00, 0.50, 0.00, //  -3
-  1.00, 0.00, 0.00  //  -1
-};
 
 struct gain {
   struct alsa_elem *elem;
@@ -268,9 +258,9 @@ static void init_gain_widget(
     gtk_dial_set_peak_hold(GTK_DIAL(data->dial), 1000);
     gtk_dial_set_level_meter_colours(
       GTK_DIAL(data->dial),
-      level_breakpoints,
-      level_colours,
-      sizeof(level_breakpoints) / sizeof(int)
+      level_band_breakpoints,
+      level_band_colours,
+      LEVEL_BAND_COUNT
     );
     gtk_dial_set_off_db(GTK_DIAL(data->dial), -45);
   }

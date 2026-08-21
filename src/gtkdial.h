@@ -108,7 +108,6 @@ void gtk_dial_set_level_meter_colours(
 
 void gtk_dial_set_peak_hold(GtkDial *dial, int peak_hold);
 int gtk_dial_get_peak_hold(GtkDial *dial);
-void gtk_dial_peak_tick(void);
 
 void gtk_dial_set_level(GtkDial *dial, double level);
 double gtk_dial_get_level(GtkDial *dial);

@@ -6,4 +6,9 @@
 #include "alsa.h"
 
 GtkWidget *create_levels_controls(struct alsa_card *card);
+
 void restart_levels_timer(struct alsa_card *card);
+
+// Re-apply the levels window layout when the set of available ports
+// changes
+void update_levels_availability(struct alsa_card *card);

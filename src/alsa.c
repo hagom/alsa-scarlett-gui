@@ -29,15 +29,6 @@
 #define SNDRV_CTL_TLVT_FCP_CHANNEL_LABELS 0x110
 #endif
 
-// names for the port categories
-const char *port_category_names[PC_COUNT] = {
-  NULL,
-  "Hardware Outputs",
-  "Mixer Inputs",
-  "DSP Inputs",
-  "PCM Inputs"
-};
-
 // short names for the port categories (for debug output)
 const char *port_category_short_names[PC_COUNT] = {
   "OFF",
