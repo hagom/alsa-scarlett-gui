@@ -68,18 +68,18 @@ ports.
 | Dual | - | S/PDIF 1-2 | S/PDIF 1-2 | S/PDIF 1-2 |
 | Quad | - | S/PDIF 1-2 | - | - |
 
-## Scarlett 4th Gen 18i20
+## Scarlett 4th Gen 18i20 and ISA C8X
 
-This model has S/PDIF In/Out (coaxial/RCA), Optical 1 In/Out, and
+These models have S/PDIF In/Out (coaxial/RCA), Optical 1 In/Out, and
 Optical 2 In/Out ports.
 
 ### RCA S/PDIF Mode
 
-| Rate | S/PDIF In | S/PDIF Out | Optical 1 In | Optical 1 Out | Optical 2 |
-|------|-----------|------------|--------------|---------------|-----------|
-| Single | S/PDIF 1-2 | S/PDIF 1-2 | ADAT 1-8 | ADAT 1-8 | - |
-| Dual | S/PDIF 1-2 | S/PDIF 1-2 | ADAT 1-4 | ADAT 1-4 | - |
-| Quad | - | S/PDIF 1-2 | - | - | - |
+| Rate | S/PDIF In | S/PDIF Out | Optical 1 In | Optical 1 Out | Optical 2 In | Optical 2 Out |
+|------|-----------|------------|--------------|---------------|--------------|---------------|
+| Single | S/PDIF 1-2 | S/PDIF 1-2 | ADAT 1-8 | ADAT 1-8 | - | ADAT 9-16 |
+| Dual | S/PDIF 1-2 | S/PDIF 1-2 | ADAT 1-4 | ADAT 1-4 | - | - |
+| Quad | - | S/PDIF 1-2 | - | - | - | - |
 
 ### Optical S/PDIF Mode
 
