@@ -22,6 +22,7 @@
 #include "window-autogain.h"
 #include "window-configuration.h"
 #include "window-dsp.h"
+#include "window-geometry.h"
 #include "window-helper.h"
 #include "window-levels.h"
 #include "window-mixer.h"
@@ -742,6 +743,8 @@ static GtkWidget *create_global_box(GtkWidget *grid, int *x, int orient) {
 
   gtk_box_append(GTK_BOX(box), label);
   gtk_box_append(GTK_BOX(box), controls);
+
+  widget_doc_register_group(box, "global", NULL, "Global");
 
   gtk_grid_attach(GTK_GRID(grid), box, *x, 0, 1, 1);
 
@@ -2162,6 +2165,8 @@ static void create_input_controls(
   gtk_widget_set_halign(label_ic, GTK_ALIGN_START);
   gtk_box_append(GTK_BOX(box), label_ic);
 
+  widget_doc_register_group(box, "inputs", NULL, "Analogue Inputs");
+
   GtkWidget *input_grid = gtk_grid_new();
   gtk_widget_add_css_class(input_grid, "controls-content");
   gtk_widget_add_css_class(input_grid, "packed-columns");
@@ -2472,6 +2477,8 @@ static void create_output_controls(
   gtk_widget_add_css_class(label_oc, "controls-label");
   gtk_widget_set_halign(label_oc, GTK_ALIGN_START);
   gtk_box_append(GTK_BOX(box), label_oc);
+
+  widget_doc_register_group(box, "outputs", NULL, "Analogue Outputs");
 
   GtkWidget *output_grid = gtk_grid_new();
   gtk_widget_add_css_class(output_grid, "controls-content");

@@ -163,7 +163,12 @@ static void activate_screenshot(
   if (!window)
     return;
 
-  screenshot_widget_to_png(window, path);
+  char *reason = NULL;
+  if (!screenshot_widget_to_png(window, path, &reason)) {
+    fprintf(stderr, "can't capture %s to %s: %s\n", name, path, reason);
+    g_free(reason);
+    return;
+  }
 
   // Alongside the PNG, write a <path>.json sidecar (.png replaced with
   // .json where present) describing the documented regions within it.

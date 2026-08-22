@@ -14,6 +14,7 @@
 #include "stereo-link.h"
 #include "stringhelper.h"
 #include "widget-gain.h"
+#include "window-geometry.h"
 #include "window-mixer.h"
 
 // data structure for rotated label info
@@ -916,6 +917,34 @@ static struct routing_src *get_mixer_r_src(
   return NULL;
 }
 
+/* A mix's row and a mixer input's column are each a documented section,
+ * built from the labels at the grid's edges and every gain along it, so
+ * that a crop of one takes in its label. Mixes are lettered as the rest
+ * of the app letters them, from the port number.
+ */
+static void register_mix_row(GtkWidget *widget, struct routing_src *r_src) {
+  char instance[2] = { 'A' + r_src->port_num, 0 };
+  char *title = g_strdup_printf("Mix %s", instance);
+
+  widget_doc_register_group(widget, "mix", instance, title);
+
+  g_free(title);
+}
+
+static void register_mixer_input_column(
+  GtkWidget          *widget,
+  struct routing_snk *r_snk
+) {
+  char instance[8];
+  snprintf(instance, sizeof(instance), "%d", r_snk->elem->lr_num);
+
+  char *title = g_strdup_printf("Mixer In %d", r_snk->elem->lr_num);
+
+  widget_doc_register_group(widget, "mixer-input", instance, title);
+
+  g_free(title);
+}
+
 static void populate_mixer_gain_widgets(struct alsa_card *card) {
   int num_mixes = card->routing_in_count[PC_MIX];
   int num_inputs = card->routing_out_count[PC_MIX];
@@ -1034,6 +1063,9 @@ static void populate_mixer_gain_widgets(struct alsa_card *card) {
       );
 
       add_mixer_hover_controller(w);
+
+      register_mix_row(w, mix_src);
+      register_mixer_input_column(w, r_snk);
     }
   }
 
@@ -1150,6 +1182,9 @@ GtkWidget *create_mixer_controls(struct alsa_card *card) {
     if (r_src) {
       r_src->mixer_label_left = l_left;
       r_src->mixer_label_right = l_right;
+
+      register_mix_row(l_left, r_src);
+      register_mix_row(l_right, r_src);
     }
   }
 
@@ -1196,6 +1231,9 @@ GtkWidget *create_mixer_controls(struct alsa_card *card) {
         GTK_GRID(mixer_top), r_snk->mixer_label_bottom,
         input_num + 1, card->routing_in_count[PC_MIX] + 1, 1, 1
       );
+
+      register_mixer_input_column(r_snk->mixer_label_top, r_snk);
+      register_mixer_input_column(r_snk->mixer_label_bottom, r_snk);
     }
   }
 

@@ -8,6 +8,7 @@
 #include "widget-boolean.h"
 #include "widget-drop-down.h"
 #include "window-configuration.h"
+#include "window-geometry.h"
 #include "window-helper.h"
 
 GtkWidget *create_iface_no_mixer_main(struct alsa_card *card) {
@@ -37,6 +38,9 @@ GtkWidget *create_iface_no_mixer_main(struct alsa_card *card) {
 
   gtk_box_append(GTK_BOX(input_box), label_ic);
   gtk_box_append(GTK_BOX(output_box), label_oc);
+
+  widget_doc_register_group(input_box, "inputs", NULL, "Input Controls");
+  widget_doc_register_group(output_box, "outputs", NULL, "Output Controls");
 
   GtkWidget *input_grid = gtk_grid_new();
   gtk_grid_set_spacing(GTK_GRID(input_grid), 10);

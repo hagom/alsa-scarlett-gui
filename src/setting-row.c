@@ -4,6 +4,7 @@
 #include "config-helpers.h"
 #include "gtkhelper.h"
 #include "setting-row.h"
+#include "window-geometry.h"
 
 GtkWidget *make_settings_grid(void) {
   GtkWidget *grid = gtk_grid_new();
@@ -40,6 +41,10 @@ GtkWidget *add_setting_row(
 
   gtk_widget_set_halign(control, GTK_ALIGN_START);
   gtk_box_append(GTK_BOX(label_box), control);
+
+  // The heading names the setting in the geometry export; these are
+  // preferences of the GUI's own, with no ALSA element to name them.
+  widget_doc_register_named(control, label);
 
   gtk_grid_attach(GTK_GRID(grid), label_box, 0, *grid_y, 1, 1);
 

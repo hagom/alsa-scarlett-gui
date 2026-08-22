@@ -177,6 +177,7 @@ static void draw_group_highlights(
 static GtkWidget *create_routing_group_grid(
   struct alsa_card *card,
   char             *name,
+  char             *doc_id,
   char             *descr,
   char             *tooltip,
   GtkOrientation    orientation,
@@ -214,6 +215,8 @@ static GtkWidget *create_routing_group_grid(
   if (grid_out)
     *grid_out = grid;
 
+  GtkWidget *container;
+
   if (orientation == GTK_ORIENTATION_HORIZONTAL) {
     // Horizontal: hbox with label_vbox on left, overlay on right
     GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
@@ -229,22 +232,34 @@ static GtkWidget *create_routing_group_grid(
 
     gtk_box_append(GTK_BOX(hbox), label_vbox);
     gtk_box_append(GTK_BOX(hbox), overlay);
-    return hbox;
+    container = hbox;
+  } else {
+    // Vertical: vbox with label on top, overlay below
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_widget_add_css_class(vbox, "controls-content");
+    gtk_widget_set_halign(vbox, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(vbox, GTK_ALIGN_CENTER);
+    gtk_widget_set_vexpand(vbox, TRUE);
+    gtk_widget_set_halign(label, align);
+    gtk_widget_set_halign(overlay, GTK_ALIGN_FILL);
+
+    gtk_box_append(GTK_BOX(vbox), label);
+    gtk_box_append(GTK_BOX(vbox), overlay);
+
+    container = vbox;
   }
 
-  // Vertical: vbox with label on top, overlay below
-  GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-  gtk_widget_add_css_class(vbox, "controls-content");
-  gtk_widget_set_halign(vbox, GTK_ALIGN_FILL);
-  gtk_widget_set_valign(vbox, GTK_ALIGN_CENTER);
-  gtk_widget_set_vexpand(vbox, TRUE);
-  gtk_widget_set_halign(label, align);
-  gtk_widget_set_halign(overlay, GTK_ALIGN_FILL);
+  /* The heading titles the section in the documentation geometry export.
+   * Narrow columns break their heading over two lines, which a title
+   * does not want.
+   */
+  char *doc_title = g_strdup(descr);
 
-  gtk_box_append(GTK_BOX(vbox), label);
-  gtk_box_append(GTK_BOX(vbox), overlay);
+  g_strdelimit(doc_title, "\n", ' ');
+  widget_doc_register_group(container, doc_id, NULL, doc_title);
+  g_free(doc_title);
 
-  return vbox;
+  return container;
 }
 
 static void create_routing_grid(struct alsa_card *card) {
@@ -262,27 +277,27 @@ static void create_routing_grid(struct alsa_card *card) {
 
   // All grids: container is vbox/hbox, grid is separate for widget attachment
   GtkWidget *hw_in_container = create_routing_group_grid(
-    card, "routing_hw_in_grid", "Hardware Inputs",
+    card, "routing_hw_in_grid", "hardware-inputs", "Hardware Inputs",
     "Hardware Inputs are the physical inputs on the interface",
     GTK_ORIENTATION_VERTICAL, GTK_ALIGN_END, NULL,
     &card->routing_hw_in_grid
   );
   GtkWidget *pcm_in_container = create_routing_group_grid(
-    card, "routing_pcm_in_grid", "PCM Outputs",
+    card, "routing_pcm_in_grid", "pcm-outputs", "PCM Outputs",
     "PCM Outputs are the digital audio channels sent from the PC to "
     "the interface over USB, used for audio playback",
     GTK_ORIENTATION_VERTICAL, GTK_ALIGN_END, NULL,
     &card->routing_pcm_in_grid
   );
   GtkWidget *pcm_out_container = create_routing_group_grid(
-    card, "routing_pcm_out_grid", "PCM Inputs",
+    card, "routing_pcm_out_grid", "pcm-inputs", "PCM Inputs",
     "PCM Inputs are the digital audio channels sent from the interface "
     "to the PC over USB, use for audio recording",
     GTK_ORIENTATION_VERTICAL, GTK_ALIGN_START, NULL,
     &card->routing_pcm_out_grid
   );
   GtkWidget *hw_out_container = create_routing_group_grid(
-    card, "routing_hw_out_grid", "Hardware Outputs",
+    card, "routing_hw_out_grid", "hardware-outputs", "Hardware Outputs",
     "Hardware Outputs are the physical outputs on the interface",
     GTK_ORIENTATION_VERTICAL, GTK_ALIGN_START, NULL,
     &card->routing_hw_out_grid
@@ -295,14 +310,14 @@ static void create_routing_grid(struct alsa_card *card) {
 
   if (has_dsp) {
     dsp_in_container = create_routing_group_grid(
-      card, "routing_dsp_in_grid", "DSP\nInputs",
+      card, "routing_dsp_in_grid", "dsp-inputs", "DSP\nInputs",
       "DSP Inputs are used to send audio to the DSP, which is used for "
       "features such as the input level meters, Air mode, and Autogain",
       GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER, NULL,
       &card->routing_dsp_in_grid
     );
     dsp_out_container = create_routing_group_grid(
-      card, "routing_dsp_out_grid", "DSP\nOutputs",
+      card, "routing_dsp_out_grid", "dsp-outputs", "DSP\nOutputs",
       "DSP Outputs are used to send audio from the DSP after it has "
       "done its processing",
       GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER, NULL,
@@ -311,13 +326,13 @@ static void create_routing_grid(struct alsa_card *card) {
   }
   if (!card->has_fixed_mixer_inputs)
     mixer_in_container = create_routing_group_grid(
-      card, "routing_mixer_in_grid", "Mixer\nInputs",
+      card, "routing_mixer_in_grid", "mixer-inputs", "Mixer\nInputs",
       "Mixer Inputs are used to mix multiple audio channels together",
       GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER,
       &card->routing_mixer_in_heading, &card->routing_mixer_in_grid
     );
   mixer_out_container = create_routing_group_grid(
-    card, "routing_mixer_out_grid",
+    card, "routing_mixer_out_grid", "mixer-outputs",
     card->has_talkback ? "Mixer Outputs" : "Mixer\nOutputs",
     "Mixer Outputs are used to send audio from the mixer",
     GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER,
@@ -1500,6 +1515,9 @@ static void setup_src_label(struct routing_src *r_src, const char *name) {
     name, "routing_src", r_src,
     r_src->port_category, is_src_linked(r_src), 1.0
   );
+
+  // same name as the socket, so the documented region covers both
+  widget_doc_register_named(r_src->label_widget, r_src->name);
 }
 
 // Set up a sink socket widget (stereo handling only - click/drag at overlay level)
@@ -1534,6 +1552,9 @@ static void setup_snk_label(struct routing_snk *r_snk, const char *name) {
     name, "routing_snk", r_snk,
     r_snk->elem->port_category, is_snk_linked(r_snk), 0.0
   );
+
+  // same element as the socket, so the documented region covers both
+  widget_doc_register(r_snk->label_widget, r_snk->elem);
 }
 
 static GtkWidget *make_talkback_mix_widget(
@@ -1564,6 +1585,13 @@ static GtkWidget *make_talkback_mix_widget(
     talkback_elem, display_name, display_name
   );
   g_free(display_name);
+
+  /* The button takes the label's place under the socket and carries the
+   * mix's name, so it is part of the mix's region as well as being the
+   * talkback control in its own right.
+   */
+  widget_doc_register_named(button, r_src->name);
+
   return button;
 }
 

@@ -13,6 +13,7 @@
 #include "widget-boolean.h"
 #include "widget-drop-down.h"
 #include "window-configuration.h"
+#include "window-geometry.h"
 #include "window-startup.h"
 
 // Wrapper for create_update_firmware_window (passes NULL for parent_label)
@@ -264,6 +265,7 @@ static void add_reset_action(
   w = gtk_button_new_with_label(button_label);
   gtk_grid_attach(GTK_GRID(grid), w, 0, *grid_y + 1, 1, 1);
   g_signal_connect(w, "clicked", callback, card);
+  widget_doc_register_named(w, label);
 
   w = big_label(description);
   gtk_grid_attach(GTK_GRID(grid), w, 1, *grid_y, 1, 2);

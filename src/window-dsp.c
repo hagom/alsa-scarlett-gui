@@ -13,6 +13,7 @@
 #include "widget-boolean.h"
 #include "widget-filter-type.h"
 #include "window-dsp.h"
+#include "window-geometry.h"
 
 #define SAMPLE_RATE 48000.0
 
@@ -154,6 +155,8 @@ static GtkWidget *make_int_slider_with_curve(
   int_slider_updated(elem, data);
 
   g_object_weak_ref(G_OBJECT(box), (GWeakNotify)int_slider_destroy, data);
+
+  widget_doc_register(box, elem);
 
   return box;
 }
@@ -825,6 +828,17 @@ static void make_filter_stage(
   gtk_grid_attach(GTK_GRID(grid), stage->gain_box, col++, row, 1, 1);
   add_hover_controller(stage->gain_box, stage);
 
+  /* Documented by the elements the parameters persist in rather than by
+   * the coefficients they compute, so that each control has a name of
+   * its own. A card with no serial has no such elements, and so
+   * registers nothing.
+   */
+  widget_doc_register(stage->enable_check, stage->state_enable_elem);
+  widget_doc_register(stage->type_dropdown, stage->state_type_elem);
+  widget_doc_register(stage->freq_box, stage->state_freq_elem);
+  widget_doc_register(stage->q_box, stage->state_q_elem);
+  widget_doc_register(stage->gain_box, stage->state_gain_elem);
+
   // Update control visibility based on filter type
   filter_stage_update_gain_visibility(stage);
   filter_stage_update_freq_q_visibility(stage);
@@ -1056,6 +1070,8 @@ static GtkWidget *create_dsp_link_button(struct alsa_elem *link_elem) {
   int value = alsa_get_elem_value(link_elem);
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(link_button), value != 0);
   update_dsp_link_button_appearance(GTK_TOGGLE_BUTTON(link_button));
+
+  widget_doc_register(link_button, link_elem);
 
   return link_button;
 }
@@ -1559,14 +1575,37 @@ static void preset_callback_data_destroy(struct preset_callback_data *data) {
 
 // Create a section box with header, presets button, and content
 // Returns the presets button via presets_button_out for later configuration
+/* How each section is identified in the documentation geometry export:
+ * the documentation group it belongs to, and the element-name prefix
+ * its Presets button is named by, matching the prefix the section's
+ * other elements use.
+ */
+static const struct {
+  const char *group;
+  const char *elem_prefix;
+} section_docs[] = {
+  [PRESET_TYPE_PRECOMP]    = { "precomp",    "Pre-Comp"   },
+  [PRESET_TYPE_COMPRESSOR] = { "compressor", "Compressor" },
+  [PRESET_TYPE_PEQ]        = { "peq",        "PEQ"        }
+};
+
 static GtkWidget *create_section_box(
   const char  *title,
   int          preset_type,
+  int          channel,
   GtkWidget  **presets_button_out
 ) {
   GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
   gtk_widget_set_margin_start(box, 5);
   gtk_widget_set_margin_end(box, 5);
+
+  // one section of this kind per channel, so the channel distinguishes
+  // their crops
+  char instance[8];
+  snprintf(instance, sizeof(instance), "%d", channel);
+  widget_doc_register_group(
+    box, section_docs[preset_type].group, instance, title
+  );
 
   // Header row with title and presets button
   GtkWidget *header_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
@@ -1583,6 +1622,12 @@ static GtkWidget *create_section_box(
   gtk_widget_add_css_class(presets_button, "presets-button");
   gtk_widget_set_valign(presets_button, GTK_ALIGN_CENTER);
   gtk_box_append(GTK_BOX(header_box), presets_button);
+
+  char *presets_name = g_strdup_printf(
+    "Line In %d %s Presets", channel, section_docs[preset_type].elem_prefix
+  );
+  widget_doc_register_named(presets_button, presets_name);
+  g_free(presets_name);
 
   if (presets_button_out)
     *presets_button_out = presets_button;
@@ -1651,6 +1696,23 @@ static void connect_compressor_presets_button(
   g_signal_connect(presets_button, "clicked", G_CALLBACK(preset_button_clicked), data);
   g_object_set_data_full(G_OBJECT(presets_button), "preset_data", data,
                          (GDestroyNotify)preset_callback_data_destroy);
+}
+
+/* The response graphs and the compressor curve have no element of their
+ * own, so they are documented by name, following the element-name prefix
+ * the rest of their section uses. They are what a reader drags to move a
+ * filter or a threshold, so they need pointing at.
+ */
+static void register_dsp_display(
+  GtkWidget  *widget,
+  const char *prefix,
+  const char *what
+) {
+  char *name = g_strdup_printf("%s%s", prefix, what);
+
+  widget_doc_register_named(widget, name);
+
+  g_free(name);
 }
 
 // Create controls for one line input channel
@@ -1789,7 +1851,8 @@ static void add_channel_controls(
   if (precomp_enable) {
     GtkWidget *precomp_presets_button;
     GtkWidget *precomp_box = create_section_box(
-      "Pre-Compressor Filter", PRESET_TYPE_PRECOMP, &precomp_presets_button
+      "Pre-Compressor Filter", PRESET_TYPE_PRECOMP, channel,
+      &precomp_presets_button
     );
     gtk_box_append(GTK_BOX(sections_box), precomp_box);
 
@@ -1797,6 +1860,7 @@ static void add_channel_controls(
     GtkWidget *precomp_response_widget = gtk_filter_response_new(2);
     precomp_response = GTK_FILTER_RESPONSE(precomp_response_widget);
     gtk_box_append(GTK_BOX(precomp_box), precomp_response_widget);
+    register_dsp_display(precomp_response_widget, prefix, "Pre-Comp Response");
 
     // Filter stages grid
     GtkWidget *precomp_grid = gtk_grid_new();
@@ -1854,7 +1918,7 @@ static void add_channel_controls(
   if (comp_enable) {
     GtkWidget *comp_presets_button;
     GtkWidget *comp_box = create_section_box(
-      "Compressor", PRESET_TYPE_COMPRESSOR, &comp_presets_button
+      "Compressor", PRESET_TYPE_COMPRESSOR, channel, &comp_presets_button
     );
     gtk_box_append(GTK_BOX(sections_box), comp_box);
 
@@ -1862,6 +1926,7 @@ static void add_channel_controls(
     GtkWidget *curve_widget = gtk_compressor_curve_new();
     comp_curve = GTK_COMPRESSOR_CURVE(curve_widget);
     gtk_box_append(GTK_BOX(comp_box), curve_widget);
+    register_dsp_display(curve_widget, prefix, "Compressor Curve");
 
     // Store for level updates
     struct dsp_comp_widget *dcw = g_malloc0(sizeof(struct dsp_comp_widget));
@@ -1974,7 +2039,7 @@ static void add_channel_controls(
   if (peq_enable) {
     GtkWidget *peq_presets_button;
     GtkWidget *peq_box = create_section_box(
-      "Parametric EQ Filter", PRESET_TYPE_PEQ, &peq_presets_button
+      "Parametric EQ Filter", PRESET_TYPE_PEQ, channel, &peq_presets_button
     );
     gtk_widget_set_hexpand(peq_box, TRUE);
     gtk_box_append(GTK_BOX(sections_box), peq_box);
@@ -1984,6 +2049,7 @@ static void add_channel_controls(
     peq_response = GTK_FILTER_RESPONSE(peq_response_widget);
     gtk_widget_set_hexpand(peq_response_widget, TRUE);
     gtk_box_append(GTK_BOX(peq_box), peq_response_widget);
+    register_dsp_display(peq_response_widget, prefix, "PEQ Response");
 
     // Filter bands grid
     GtkWidget *peq_grid = gtk_grid_new();

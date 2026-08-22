@@ -16,6 +16,7 @@
 #include "widget-gain.h"
 #include "widget-level-meter.h"
 #include "window-dsp.h"
+#include "window-geometry.h"
 #include "window-levels.h"
 #include "window-mixer.h"
 #include "window-routing.h"
@@ -984,6 +985,31 @@ static void group_state_free(void *user_data, GClosure *closure) {
   g_free(gs);
 }
 
+/* Name a meter's region in the geometry export by what it meters: the
+ * routing endpoint where it has one, otherwise the hardware's own label
+ * for the metered channel. Endpoint names match those the routing
+ * window exports, so documentation of a port can point at both.
+ */
+static void register_meter_doc(
+  struct levels      *data,
+  struct level_meter *meter
+) {
+  if (meter->snk) {
+    widget_doc_register(meter->widget, meter->snk->elem);
+    return;
+  }
+
+  if (meter->src) {
+    widget_doc_register_named(meter->widget, meter->src->name);
+    return;
+  }
+
+  char **labels = data->level_meter_elem->meter_labels;
+
+  if (labels && meter->level_index >= 0)
+    widget_doc_register_named(meter->widget, labels[meter->level_index]);
+}
+
 static void create_meter_group(
   struct levels      *data,
   struct meter_group *group,
@@ -1045,6 +1071,7 @@ static void create_meter_group(
       GTK_LEVEL_METER(meter->widget), PEAK_HOLD_MS
     );
     gtk_grid_attach(GTK_GRID(grid), meter->widget, i + 1, 0, 1, 1);
+    register_meter_doc(data, meter);
 
     char s[20];
     snprintf(s, sizeof(s), "%d", meter->num);
@@ -1199,6 +1226,12 @@ GtkWidget *create_levels_controls(struct alsa_card *card) {
     data->rows[i] = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, GROUP_SPACING);
     gtk_widget_set_vexpand(data->rows[i], TRUE);
     gtk_expander_set_child(GTK_EXPANDER(data->row_boxes[i]), data->rows[i]);
+
+    // the expander rather than its content, so a crop of the row takes
+    // in the title above it
+    widget_doc_register_group(
+      data->row_boxes[i], row_ids[i], NULL, row_titles[i]
+    );
 
     gtk_box_append(GTK_BOX(box), data->row_boxes[i]);
   }
