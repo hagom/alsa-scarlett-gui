@@ -185,6 +185,23 @@ static void activate_screenshot(
   g_free(json_path);
 }
 
+// Save the card's complete configuration to the given path, in the
+// same native format the presets and Save dialogue write. Unlike
+// win.save this takes a path and shows no dialogue, so a script can
+// capture the configuration.
+static void activate_save_config(
+  GSimpleAction *action,
+  GVariant      *parameter,
+  gpointer       data
+) {
+  struct alsa_card *card = data;
+  const char *path;
+  g_variant_get(parameter, "&s", &path);
+
+  if (save_native(card, path) < 0)
+    fprintf(stderr, "can't save configuration to %s\n", path);
+}
+
 // Set a control's value by name, as if the user had changed it in the
 // UI, so documentation tooling can capture before/after states such as
 // stereo link, port visibility, and custom names.
@@ -323,7 +340,8 @@ void add_load_save_action_map(struct alsa_card *card) {
 
 static const GActionEntry screenshot_entries[] = {
   {"screenshot",  activate_screenshot,  "(ss)"},
-  {"set-control", activate_set_control, "(ss)"}
+  {"set-control", activate_set_control, "(ss)"},
+  {"save-config", activate_save_config, "s"}
 };
 
 void add_screenshot_action_map(struct alsa_card *card) {
