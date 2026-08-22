@@ -780,7 +780,110 @@ static int get_snk_bounds_relative(
   return 1;
 }
 
-// Draw highlights for hovered sources/sinks in a group's overlay
+// Draw the highlight for a source, and its stereo partner, if it belongs
+// to this group's overlay
+static void draw_src_highlight(
+  cairo_t            *cr,
+  GtkWidget          *highlight_widget,
+  GtkWidget          *overlay,
+  struct routing_src *src
+) {
+  GtkWidget *parent = src->widget2 ? gtk_widget_get_parent(src->widget2) : NULL;
+  if (!parent || gtk_widget_get_parent(parent) != overlay)
+    return;
+
+  graphene_rect_t bounds;
+  if (get_src_bounds_relative(src, highlight_widget, &bounds))
+    draw_highlight_rect(cr, &bounds);
+
+  if (!is_src_linked(src))
+    return;
+
+  struct routing_src *partner = get_src_partner(src);
+  if (partner && get_src_bounds_relative(partner, highlight_widget, &bounds))
+    draw_highlight_rect(cr, &bounds);
+}
+
+// Draw the highlight for a sink, and its stereo partner, if it belongs to
+// this group's overlay
+static void draw_snk_highlight(
+  cairo_t            *cr,
+  GtkWidget          *highlight_widget,
+  GtkWidget          *overlay,
+  struct routing_snk *snk
+) {
+  GtkWidget *parent = snk->socket_widget
+    ? gtk_widget_get_parent(snk->socket_widget) : NULL;
+  if (!parent || gtk_widget_get_parent(parent) != overlay)
+    return;
+
+  graphene_rect_t bounds;
+  if (get_snk_bounds_relative(snk, highlight_widget, &bounds))
+    draw_highlight_rect(cr, &bounds);
+
+  if (!is_snk_linked(snk))
+    return;
+
+  struct routing_snk *partner = get_snk_partner(snk);
+  if (partner && get_snk_bounds_relative(partner, highlight_widget, &bounds))
+    draw_highlight_rect(cr, &bounds);
+}
+
+// Collect the source ids covered by a source: its own, plus its stereo
+// partner's if linked. Returns the number of ids written to ids[2].
+static int get_src_ids(struct routing_src *src, int *ids) {
+  int count = 0;
+
+  ids[count++] = src->id;
+
+  if (is_src_linked(src)) {
+    struct routing_src *partner = get_src_partner(src);
+    if (partner)
+      ids[count++] = partner->id;
+  }
+
+  return count;
+}
+
+// Collect the source ids a sink is fed from: its own, plus its stereo
+// partner's if linked. Returns the number of ids written to ids[2].
+static int get_snk_src_ids(struct routing_snk *snk, int *ids) {
+  int count = 0;
+
+  ids[count++] = snk->effective_source_idx;
+
+  if (is_snk_linked(snk)) {
+    struct routing_snk *partner = get_snk_partner(snk);
+    if (partner)
+      ids[count++] = partner->effective_source_idx;
+  }
+
+  return count;
+}
+
+static int ids_intersect(int *a, int a_count, int *b, int b_count) {
+  for (int i = 0; i < a_count; i++)
+    for (int j = 0; j < b_count; j++)
+      if (a[i] == b[j])
+        return 1;
+
+  return 0;
+}
+
+// Remove the "Off" source id (0) in place; returns the remaining count
+static int drop_off_ids(int *ids, int count) {
+  int out = 0;
+
+  for (int i = 0; i < count; i++)
+    if (ids[i])
+      ids[out++] = ids[i];
+
+  return out;
+}
+
+// Draw highlights for the hovered source/sink, and everything connected to
+// it: the sinks fed by a source, plus the source and all other sinks sharing
+// it when a sink is hovered
 static void draw_group_highlights(
   GtkDrawingArea *drawing_area,
   cairo_t        *cr,
@@ -796,46 +899,63 @@ static void draw_group_highlights(
   if (!overlay)
     return;
 
-  // Check hovered source
+  // The connection is identified by the source id(s) involved
+  int ids[2];
+  int id_count = 0;
+
   if (card->hovered_src) {
-    struct routing_src *src = card->hovered_src;
-
-    // Check if this source's widget is in this group's grid
-    GtkWidget *src_parent = src->widget2
-      ? gtk_widget_get_parent(src->widget2) : NULL;
-    if (src_parent && gtk_widget_get_parent(src_parent) == overlay) {
-      graphene_rect_t bounds;
-      if (get_src_bounds_relative(src, highlight_widget, &bounds))
-        draw_highlight_rect(cr, &bounds);
-
-      // Also draw partner if stereo-linked
-      if (is_src_linked(src)) {
-        struct routing_src *partner = get_src_partner(src);
-        if (partner && get_src_bounds_relative(partner, highlight_widget, &bounds))
-          draw_highlight_rect(cr, &bounds);
-      }
-    }
+    draw_src_highlight(cr, highlight_widget, overlay, card->hovered_src);
+    id_count = get_src_ids(card->hovered_src, ids);
+  } else if (card->hovered_snk) {
+    draw_snk_highlight(cr, highlight_widget, overlay, card->hovered_snk);
+    id_count = get_snk_src_ids(card->hovered_snk, ids);
+  } else {
+    return;
   }
 
-  // Check hovered sink
-  if (card->hovered_snk) {
-    struct routing_snk *snk = card->hovered_snk;
+  // Unconnected sinks (source "Off") have nothing on the other end
+  id_count = drop_off_ids(ids, id_count);
+  if (!id_count)
+    return;
 
-    // Check if this sink's widget is in this group's grid
-    GtkWidget *snk_parent = snk->socket_widget
-      ? gtk_widget_get_parent(snk->socket_widget) : NULL;
-    if (snk_parent && gtk_widget_get_parent(snk_parent) == overlay) {
-      graphene_rect_t bounds;
-      if (get_snk_bounds_relative(snk, highlight_widget, &bounds))
-        draw_highlight_rect(cr, &bounds);
+  // Highlight the source(s) of the connection
+  for (int i = 1; i < card->routing_srcs->len; i++) {
+    struct routing_src *src = &g_array_index(
+      card->routing_srcs, struct routing_src, i
+    );
 
-      // Also draw partner if stereo-linked
-      if (is_snk_linked(snk)) {
-        struct routing_snk *partner = get_snk_partner(snk);
-        if (partner && get_snk_bounds_relative(partner, highlight_widget, &bounds))
-          draw_highlight_rect(cr, &bounds);
-      }
-    }
+    if (!src->widget2 || src == card->hovered_src)
+      continue;
+
+    // linked pairs are drawn from the left channel
+    if (is_src_linked(src) && !is_src_left_channel(src))
+      continue;
+
+    int src_ids[2];
+    int src_id_count = get_src_ids(src, src_ids);
+
+    if (ids_intersect(ids, id_count, src_ids, src_id_count))
+      draw_src_highlight(cr, highlight_widget, overlay, src);
+  }
+
+  // Highlight every sink fed by that source
+  for (int i = 0; i < card->routing_snks->len; i++) {
+    struct routing_snk *snk = &g_array_index(
+      card->routing_snks, struct routing_snk, i
+    );
+
+    if (!snk->socket_widget || snk == card->hovered_snk)
+      continue;
+
+    // linked pairs are drawn from the left channel
+    if (is_snk_linked(snk) && !is_snk_left_channel(snk))
+      continue;
+
+    int snk_src_ids[2];
+    int snk_src_id_count = get_snk_src_ids(snk, snk_src_ids);
+
+    if (ids_intersect(ids, id_count, snk_src_ids, snk_src_id_count))
+      draw_snk_highlight(cr, highlight_widget, overlay, snk);
   }
 }
 
@@ -1883,6 +2003,7 @@ static void routing_updated(struct alsa_elem *elem, void *data) {
     update_snk_effective_source(r_snk);
 
   update_mixer_labels(card);
+  queue_redraw_group_highlights(card);
   gtk_widget_queue_draw(card->routing_lines);
 }
 
