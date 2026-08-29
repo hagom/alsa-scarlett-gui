@@ -1940,6 +1940,10 @@ struct pair_elem_sync {
   struct alsa_elem *link_elem;
   struct alsa_elem *from;
   struct alsa_elem *to;
+
+  // Set for elements the device drives itself while the output is in
+  // a monitor group; ganging them then would fight the device
+  struct routing_snk *mg_snk;
 };
 
 static void pair_elem_sync_updated(struct alsa_elem *elem, void *private) {
@@ -1948,15 +1952,19 @@ static void pair_elem_sync_updated(struct alsa_elem *elem, void *private) {
   if (!alsa_get_elem_value(d->link_elem))
     return;
 
+  if (d->mg_snk && snk_in_any_monitor_group(d->mg_snk))
+    return;
+
   long value = alsa_get_elem_value(d->from);
   if (alsa_get_elem_value(d->to) != value)
     alsa_set_elem_value(d->to, value);
 }
 
 static void register_pair_elem_sync(
-  struct alsa_elem *link_elem,
-  struct alsa_elem *left,
-  struct alsa_elem *right
+  struct alsa_elem   *link_elem,
+  struct alsa_elem   *left,
+  struct alsa_elem   *right,
+  struct routing_snk *mg_snk
 ) {
   if (!left || !right)
     return;
@@ -1965,6 +1973,7 @@ static void register_pair_elem_sync(
   data->link_elem = link_elem;
   data->from = left;
   data->to = right;
+  data->mg_snk = mg_snk;
 
   alsa_elem_add_callback(left, pair_elem_sync_updated, data, g_free);
 
@@ -1977,6 +1986,7 @@ static void register_pair_elem_sync(
   data->link_elem = link_elem;
   data->from = right;
   data->to = left;
+  data->mg_snk = mg_snk;
 
   alsa_elem_add_callback(right, pair_elem_sync_updated, data, g_free);
 }
@@ -2127,14 +2137,16 @@ static void setup_input_strips(
         register_pair_elem_sync(
           d->hw_link_elem,
           get_input_ctl_elem(elems, "Mute Capture Switch", i),
-          get_input_ctl_elem(elems, "Mute Capture Switch", i + 1)
+          get_input_ctl_elem(elems, "Mute Capture Switch", i + 1),
+          NULL
         );
       else
         for (int j = 0; j < G_N_ELEMENTS(input_pair_sync_controls); j++)
           register_pair_elem_sync(
             link_elem,
             get_input_ctl_elem(elems, input_pair_sync_controls[j], i),
-            get_input_ctl_elem(elems, input_pair_sync_controls[j], i + 1)
+            get_input_ctl_elem(elems, input_pair_sync_controls[j], i + 1),
+            NULL
           );
       i++;
     }
@@ -2418,13 +2430,22 @@ static void setup_output_strips(
     register_io_strip(d);
 
     if (is_pair) {
-      struct alsa_elem **pair_elems[] = {
-        vol_elems, mute_elems, sw_hw_elems
-      };
+      // The device sets a grouped output's volume from the group
+      // master and that output's trim, so the two channels of a pair
+      // differ whenever their trims do: leave them to the device, and
+      // show the higher of the two on the pair's knob
+      register_pair_elem_sync(
+        snk_l->link_elem, vol_elems[i], vol_elems[i + 1], snk_l
+      );
+      set_gain_display_peer(
+        g_ptr_array_index(d->left, 0), vol_elems[i + 1]
+      );
+
+      struct alsa_elem **pair_elems[] = { mute_elems, sw_hw_elems };
 
       for (int j = 0; j < G_N_ELEMENTS(pair_elems); j++)
         register_pair_elem_sync(
-          snk_l->link_elem, pair_elems[j][i], pair_elems[j][i + 1]
+          snk_l->link_elem, pair_elems[j][i], pair_elems[j][i + 1], NULL
         );
       i++;
     }

@@ -119,20 +119,58 @@ static void free_group_output_label_data(void *data) {
   g_free(data);
 }
 
+// Create one trim fader, tooltipped with the output it belongs to
+static GtkWidget *create_trim_fader(
+  struct alsa_card   *card,
+  struct routing_snk *snk,
+  struct alsa_elem   *elem,
+  int                 ganged
+) {
+  GtkWidget *fader = make_gain_alsa_elem(
+    elem, 0, WIDGET_GAIN_TAPER_LINEAR, 1, FALSE
+  );
+  gtk_widget_set_size_request(fader, 40, 80);
+  gtk_widget_set_hexpand(fader, FALSE);
+  gtk_widget_set_valign(fader, GTK_ALIGN_CENTER);
+
+  char *name = get_snk_display_name_formatted(snk);
+  char *tooltip = ganged
+    ? g_strdup_printf(
+        "%s trim — drag to move the pair together, "
+        "Ctrl+drag for this channel only", name
+      )
+    : g_strdup_printf("%s trim", name);
+  gtk_widget_set_tooltip_text(fader, tooltip);
+  g_free(tooltip);
+  g_free(name);
+
+  card->monitor_group_gains = g_list_prepend(
+    card->monitor_group_gains, fader
+  );
+
+  return fader;
+}
+
 // Create the widgets for one monitor group of one output row.
 // enable_col is the group's first column; source and trim (when
-// present) follow it.
+// present) follow it.  snk_r is the partner sink when the output is
+// stereo-linked, NULL otherwise.
 static void create_group_cells(
-  struct alsa_card           *card,
-  GtkWidget                  *grid,
-  int                         row,
-  int                         enable_col,
-  int                         has_source,
-  int                         has_trim,
-  struct monitor_group_elems *elems,
-  struct monitor_group_elems *elems_r,
-  int                         linked
+  struct alsa_card   *card,
+  GtkWidget          *grid,
+  int                 row,
+  int                 enable_col,
+  int                 has_source,
+  int                 has_trim,
+  struct routing_snk *snk,
+  struct routing_snk *snk_r,
+  int                 g
 ) {
+  struct monitor_group_elems *elems = &snk->monitor_groups[g];
+  struct monitor_group_elems *elems_r =
+    snk_r ? &snk_r->monitor_groups[g] : NULL;
+  int linked = snk_r != NULL;
+
   // Source dropdown (create before checkbox so we can track it)
   GtkWidget *source = NULL;
   if (elems->source && has_source) {
@@ -145,27 +183,31 @@ static void create_group_cells(
     gtk_grid_attach(GTK_GRID(grid), source, enable_col + 1, row, 1, 1);
   }
 
-  // Trim (create before checkbox so we can track it)
+  // Trim (create before checkbox so we can track it).  A linked pair
+  // gets one fader per channel: trim calibrates each speaker, so the
+  // two channels must be able to differ.  The faders are ganged, so
+  // the pair moves together until Ctrl is held.
   GtkWidget *trim = NULL;
   if (elems->trim && has_trim) {
-    if (linked && elems_r && elems_r->trim) {
-      struct alsa_elem *trim_elems[] = { elems->trim, elems_r->trim };
-      trim = make_stereo_gain_alsa_elem(
-        trim_elems, 2, 0, WIDGET_GAIN_TAPER_LINEAR, 1, FALSE
+    int ganged = elems_r && elems_r->trim;
+
+    trim = create_trim_fader(card, snk, elems->trim, ganged);
+
+    if (ganged) {
+      GtkWidget *trim_r = create_trim_fader(
+        card, snk_r, elems_r->trim, ganged
       );
-    } else {
-      trim = make_gain_alsa_elem(
-        elems->trim, 0, WIDGET_GAIN_TAPER_LINEAR, 1, FALSE
-      );
+      gang_gain_widgets(trim, trim_r);
+
+      GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+      gtk_widget_set_halign(box, GTK_ALIGN_CENTER);
+      gtk_box_append(GTK_BOX(box), trim);
+      gtk_box_append(GTK_BOX(box), trim_r);
+      trim = box;
     }
-    gtk_widget_set_size_request(trim, 40, 80);
-    gtk_widget_set_hexpand(trim, FALSE);
-    gtk_widget_set_valign(trim, GTK_ALIGN_CENTER);
+
     gtk_grid_attach(
       GTK_GRID(grid), trim, enable_col + 1 + has_source, row, 1, 1
-    );
-    card->monitor_group_gains = g_list_prepend(
-      card->monitor_group_gains, trim
     );
   }
 
@@ -333,16 +375,12 @@ static GtkWidget *create_main_alt_group_grid(struct alsa_card *card) {
     }
 
     // When linked, the partner provides the right channel elements
-    // for stereo trim
     struct routing_snk *snk_r = linked ? get_snk_partner(snk) : NULL;
 
     for (int g = 0; g < group_count; g++)
       create_group_cells(
         card, grid, row, 2 + g * (group_width + 1),
-        has_source, has_trim,
-        &snk->monitor_groups[g],
-        snk_r ? &snk_r->monitor_groups[g] : NULL,
-        linked
+        has_source, has_trim, snk, snk_r, g
       );
 
     row++;

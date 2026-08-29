@@ -366,7 +366,9 @@ can set:
 - **Trim** — a volume offset relative to the group’s master volume
 
 When outputs are stereo-linked, they appear as a single pair with a
-stereo-aware source selector and averaged trim.
+stereo-aware source selector and a trim fader per channel. The trim
+faders move together unless Ctrl is held, so the pair can be adjusted
+as one but each speaker can still be calibrated separately.
 
 ## Presets
 

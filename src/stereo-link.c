@@ -1227,7 +1227,8 @@ static void sync_monitor_group_source_pair(
 }
 
 // Sync monitor group settings when outputs are linked.
-// Left channel values win for enable/source; trim is averaged.
+// Left channel values win for enable and source.  Trim is left alone:
+// it calibrates each speaker, so linking must not disturb it.
 static void sync_monitor_groups_on_link(
   struct routing_snk *snk_l,
   struct routing_snk *snk_r
@@ -1249,14 +1250,6 @@ static void sync_monitor_groups_on_link(
 
     // Source: left wins with partner assignment
     sync_monitor_group_source_pair(card, mg_l->source, mg_r->source);
-
-    // Trim: average L/R → write average to both
-    if (mg_l->trim && mg_r->trim) {
-      long avg = (alsa_get_elem_value(mg_l->trim) +
-                  alsa_get_elem_value(mg_r->trim)) / 2;
-      alsa_set_elem_value(mg_l->trim, avg);
-      alsa_set_elem_value(mg_r->trim, avg);
-    }
   }
 }
 
@@ -1363,7 +1356,6 @@ static void register_monitor_group_sync_callbacks(
 
     register_mg_sync_pair(snk_l, mg_l->enable, mg_r->enable, MG_SYNC_VALUE);
     register_mg_sync_pair(snk_l, mg_l->source, mg_r->source, MG_SYNC_SOURCE);
-    register_mg_sync_pair(snk_l, mg_l->trim, mg_r->trim, MG_SYNC_VALUE);
   }
 }
 

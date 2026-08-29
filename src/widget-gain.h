@@ -34,6 +34,17 @@ GtkWidget *make_mapped_gain_alsa_elem(
   int               value_map_len
 );
 
+// Give a gain widget a second channel to display. The widget shows
+// the higher of the two values, which is what a stereo pair whose
+// channels have been trimmed apart actually reaches. The peer is only
+// read; the widget still writes to its own element.
+void set_gain_display_peer(GtkWidget *gain_widget, struct alsa_elem *peer);
+
+// Gang two gain widgets: dragging either moves both by the same
+// amount, preserving the offset between them. Holding Ctrl moves only
+// the widget being dragged, which is how the offset is set.
+void gang_gain_widgets(GtkWidget *a, GtkWidget *b);
+
 // Get the dial widget from a gain widget container (for level updates)
 GtkWidget *get_gain_dial(GtkWidget *gain_widget);
 

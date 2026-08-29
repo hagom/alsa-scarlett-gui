@@ -200,8 +200,11 @@ When outputs are stereo-linked (via the I/O Configuration
 tab), the monitor groups display automatically updates:
 
 - The output shows as a single row with the pair name
-- Trim uses a stereo fader that adjusts both channels together
 - Enable and Source apply to both channels of the pair
+- Trim keeps a separate fader per channel, left then right. Dragging
+  either moves both together and preserves the offset between them;
+  hold Ctrl to move one channel alone, which is how you calibrate a
+  speaker that is louder than its partner
 
 ### Example Use Cases
 

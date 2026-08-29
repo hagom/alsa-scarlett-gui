@@ -23,7 +23,67 @@ struct gain {
   int               elem_count;
   int               syncing;  // flag to prevent infinite callback loops
   int               updating; // dial is being set from an ALSA update
+
+  // Ganging: partner widget moved by the same amount, and the value
+  // last seen, from which the next move's delta is measured
+  struct gain      *gang;
+  int               last_value;
+
+  // Second channel shown by this widget: the higher of the two values
+  // is displayed. Read only; writes still go to elem.
+  struct alsa_elem *display_peer;
 };
+
+// Ctrl temporarily breaks the gang so one channel can be moved alone
+static gboolean gang_override_held(GtkWidget *widget) {
+  GdkSeat *seat = gdk_display_get_default_seat(
+    gtk_widget_get_display(widget)
+  );
+  GdkDevice *keyboard = seat ? gdk_seat_get_keyboard(seat) : NULL;
+
+  if (!keyboard)
+    return FALSE;
+
+  return (gdk_device_get_modifier_state(keyboard) &
+          GDK_CONTROL_MASK) != 0;
+}
+
+// Move the ganged partner by the same amount, preserving the offset
+// between the two. Returns the value actually applied, reduced if the
+// partner would otherwise run past an end of its range.
+static int apply_gang(struct gain *data, int value) {
+  struct gain *partner = data->gang;
+
+  if (!partner || gang_override_held(data->dial))
+    return value;
+
+  int delta = value - data->last_value;
+  if (!delta)
+    return value;
+
+  struct alsa_elem *elem = partner->elems[0];
+  int partner_value = alsa_get_elem_value(elem) + delta;
+
+  if (partner_value < elem->min_val) {
+    delta += elem->min_val - partner_value;
+    partner_value = elem->min_val;
+  } else if (partner_value > elem->max_val) {
+    delta -= partner_value - elem->max_val;
+    partner_value = elem->max_val;
+  }
+
+  int clamped = data->last_value + delta;
+
+  if (clamped != value) {
+    data->updating = 1;
+    gtk_dial_set_value(GTK_DIAL(data->dial), clamped);
+    data->updating = 0;
+  }
+
+  alsa_set_elem_value(elem, partner_value);
+
+  return clamped;
+}
 
 static void gain_changed(GtkWidget *widget, struct gain *data) {
 
@@ -32,7 +92,10 @@ static void gain_changed(GtkWidget *widget, struct gain *data) {
   if (data->updating)
     return;
 
-  int value = gtk_dial_get_value(GTK_DIAL(data->dial));
+  int value = apply_gang(
+    data, gtk_dial_get_value(GTK_DIAL(data->dial))
+  );
+  data->last_value = value;
 
   // Stereo widget: set all controlled elements
   if (data->elem_count > 1) {
@@ -78,10 +141,25 @@ static void gain_updated(
   if (data->syncing)
     return;
 
+  // The peer is only ever displayed, so report the widget's own
+  // element even when the peer is what changed
+  if (data->display_peer)
+    elem = data->elem;
+
   int is_writable = alsa_get_elem_writable(elem);
   gtk_widget_set_sensitive(data->dial, is_writable);
 
   int alsa_value = alsa_get_elem_value(elem);
+  data->last_value = alsa_value;
+
+  // Show the higher of the two channels: with the channels trimmed
+  // apart there is no single value, and this is the level the pair
+  // actually reaches
+  if (data->display_peer) {
+    int peer_value = alsa_get_elem_value(data->display_peer);
+    if (peer_value > alsa_value)
+      alsa_value = peer_value;
+  }
 
   // Stereo widget: sync all other elements to match this one
   if (data->elem_count > 1) {
@@ -333,6 +411,33 @@ GtkWidget *make_mapped_gain_alsa_elem(
   return finish_gain_widget(data);
 }
 
+void set_gain_display_peer(
+  GtkWidget        *gain_widget,
+  struct alsa_elem *peer
+) {
+  struct gain *data = g_object_get_data(
+    G_OBJECT(gain_widget), "gain_data"
+  );
+
+  if (!data || !peer)
+    return;
+
+  data->display_peer = peer;
+  alsa_elem_add_callback(peer, gain_updated, data, NULL);
+  gain_updated(data->elem, data);
+}
+
+void gang_gain_widgets(GtkWidget *a, GtkWidget *b) {
+  struct gain *data_a = g_object_get_data(G_OBJECT(a), "gain_data");
+  struct gain *data_b = g_object_get_data(G_OBJECT(b), "gain_data");
+
+  if (!data_a || !data_b)
+    return;
+
+  data_a->gang = data_b;
+  data_b->gang = data_a;
+}
+
 GtkWidget *get_gain_dial(GtkWidget *gain_widget) {
   return g_object_get_data(G_OBJECT(gain_widget), "dial");
 }
@@ -351,6 +456,12 @@ void cleanup_gain_widget(GtkWidget *gain_widget) {
     if (data->elems[i])
       alsa_elem_remove_callbacks_by_data(data->elems[i], data);
   }
+
+  if (data->display_peer)
+    alsa_elem_remove_callbacks_by_data(data->display_peer, data);
+
+  if (data->gang)
+    data->gang->gang = NULL;
 
   g_object_set_data(G_OBJECT(gain_widget), "gain_data", NULL);
   free(data);
