@@ -6,9 +6,11 @@
 #include "iface-mixer.h"
 #include "routing-drag-line.h"
 #include "routing-lines.h"
+#include "routing-port-menu.h"
 #include "stereo-link.h"
 #include "stringhelper.h"
 #include "widget-boolean.h"
+#include "widget-text-entry.h"
 #include "window-geometry.h"
 #include "window-levels.h"
 #include "window-mixer.h"
@@ -161,6 +163,9 @@ static GtkWidget *make_preset_menu_button(struct alsa_card *card) {
   return button;
 }
 
+// Forward declaration for hidden connection popover teardown
+static void hide_hidden_peer_popover(struct alsa_card *card);
+
 // Forward declaration for highlight drawing
 static void draw_group_highlights(
   GtkDrawingArea *drawing_area,
@@ -169,6 +174,57 @@ static void draw_group_highlights(
   int             height,
   void           *user_data
 );
+
+// Ports of one routing group, for its heading's show/hide menu
+struct group_menu_data {
+  struct alsa_card *card;
+  int               is_src;
+  int               port_category;
+};
+
+// The menu is built when the button is clicked so that it always shows
+// the current state
+static void group_menu_create_popup(GtkMenuButton *button, gpointer user_data) {
+  struct group_menu_data *data = user_data;
+
+  gtk_menu_button_set_popover(
+    button,
+    routing_port_menu_group_popover(
+      data->card, data->is_src, data->port_category
+    )
+  );
+}
+
+// The group heading is a menu button: its arrow is the only thing telling
+// the user that the ports can be shown and hidden
+static GtkWidget *make_group_heading_button(
+  GtkWidget        *label,
+  const char       *tooltip,
+  struct alsa_card *card,
+  int               is_src,
+  int               port_category
+) {
+  struct group_menu_data *data = g_new0(struct group_menu_data, 1);
+
+  data->card = card;
+  data->is_src = is_src;
+  data->port_category = port_category;
+
+  GtkWidget *button = gtk_menu_button_new();
+
+  gtk_menu_button_set_child(GTK_MENU_BUTTON(button), label);
+  gtk_menu_button_set_always_show_arrow(GTK_MENU_BUTTON(button), TRUE);
+  gtk_menu_button_set_create_popup_func(
+    GTK_MENU_BUTTON(button), group_menu_create_popup, data, g_free
+  );
+
+  gtk_widget_add_css_class(button, "flat");
+  gtk_widget_add_css_class(button, "group-heading");
+  gtk_widget_set_tooltip_text(button, tooltip);
+  gtk_widget_set_halign(button, GTK_ALIGN_CENTER);
+
+  return button;
+}
 
 // Create a routing group with heading label and grid for widgets.
 // Returns a container (hbox or vbox) with heading outside the grid.
@@ -180,9 +236,12 @@ static GtkWidget *create_routing_group_grid(
   char             *doc_id,
   char             *descr,
   char             *tooltip,
+  int               is_src,
+  int               port_category,
   GtkOrientation    orientation,
   GtkAlign          align,
   GtkWidget       **heading_label,
+  GtkWidget       **heading_box,
   GtkWidget       **grid_out
 ) {
   GtkWidget *grid = gtk_grid_new();
@@ -206,8 +265,15 @@ static GtkWidget *create_routing_group_grid(
   gtk_overlay_set_measure_overlay(GTK_OVERLAY(overlay), grid, TRUE);
 
   GtkWidget *label = gtk_label_new(descr);
-  gtk_widget_set_tooltip_text(label, tooltip);
   gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
+
+  char *full_tooltip = g_strdup_printf(
+    "%s.\n\nClick to show or hide individual ports.", tooltip
+  );
+  GtkWidget *heading = make_group_heading_button(
+    label, full_tooltip, card, is_src, port_category
+  );
+  g_free(full_tooltip);
 
   if (heading_label)
     *heading_label = label;
@@ -220,30 +286,33 @@ static GtkWidget *create_routing_group_grid(
   if (orientation == GTK_ORIENTATION_HORIZONTAL) {
     // Horizontal: hbox with label_vbox on left, overlay on right
     GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_widget_add_css_class(hbox, "controls-content");
     gtk_widget_set_halign(hbox, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(hbox, GTK_ALIGN_CENTER);
+    gtk_widget_add_css_class(overlay, "controls-content");
 
-    // Wrap label in vbox so additional labels can be added (e.g. Talkback)
+    // Wrap heading in vbox so additional labels can be added (e.g. Talkback)
     GtkWidget *label_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     gtk_widget_set_valign(label_vbox, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(label, align);
-    gtk_box_append(GTK_BOX(label_vbox), label);
+    gtk_widget_set_valign(heading, align);
+    gtk_box_append(GTK_BOX(label_vbox), heading);
+
+    if (heading_box)
+      *heading_box = label_vbox;
 
     gtk_box_append(GTK_BOX(hbox), label_vbox);
     gtk_box_append(GTK_BOX(hbox), overlay);
     container = hbox;
   } else {
-    // Vertical: vbox with label on top, overlay below
+    // Vertical: vbox with heading on top, overlay below
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_widget_add_css_class(vbox, "controls-content");
     gtk_widget_set_halign(vbox, GTK_ALIGN_FILL);
     gtk_widget_set_valign(vbox, GTK_ALIGN_CENTER);
     gtk_widget_set_vexpand(vbox, TRUE);
-    gtk_widget_set_halign(label, align);
+    gtk_widget_set_halign(heading, align);
     gtk_widget_set_halign(overlay, GTK_ALIGN_FILL);
+    gtk_widget_add_css_class(overlay, "controls-content");
 
-    gtk_box_append(GTK_BOX(vbox), label);
+    gtk_box_append(GTK_BOX(vbox), heading);
     gtk_box_append(GTK_BOX(vbox), overlay);
 
     container = vbox;
@@ -279,27 +348,31 @@ static void create_routing_grid(struct alsa_card *card) {
   GtkWidget *hw_in_container = create_routing_group_grid(
     card, "routing_hw_in_grid", "hardware-inputs", "Hardware Inputs",
     "Hardware Inputs are the physical inputs on the interface",
-    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_END, NULL,
+    1, PC_HW,
+    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_END, NULL, NULL,
     &card->routing_hw_in_grid
   );
   GtkWidget *pcm_in_container = create_routing_group_grid(
     card, "routing_pcm_in_grid", "pcm-outputs", "PCM Outputs",
     "PCM Outputs are the digital audio channels sent from the PC to "
     "the interface over USB, used for audio playback",
-    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_END, NULL,
+    1, PC_PCM,
+    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_END, NULL, NULL,
     &card->routing_pcm_in_grid
   );
   GtkWidget *pcm_out_container = create_routing_group_grid(
     card, "routing_pcm_out_grid", "pcm-inputs", "PCM Inputs",
     "PCM Inputs are the digital audio channels sent from the interface "
     "to the PC over USB, use for audio recording",
-    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_START, NULL,
+    0, PC_PCM,
+    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_START, NULL, NULL,
     &card->routing_pcm_out_grid
   );
   GtkWidget *hw_out_container = create_routing_group_grid(
     card, "routing_hw_out_grid", "hardware-outputs", "Hardware Outputs",
     "Hardware Outputs are the physical outputs on the interface",
-    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_START, NULL,
+    0, PC_HW,
+    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_START, NULL, NULL,
     &card->routing_hw_out_grid
   );
 
@@ -313,14 +386,16 @@ static void create_routing_grid(struct alsa_card *card) {
       card, "routing_dsp_in_grid", "dsp-inputs", "DSP\nInputs",
       "DSP Inputs are used to send audio to the DSP, which is used for "
       "features such as the input level meters, Air mode, and Autogain",
-      GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER, NULL,
+      0, PC_DSP,
+      GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER, NULL, NULL,
       &card->routing_dsp_in_grid
     );
     dsp_out_container = create_routing_group_grid(
       card, "routing_dsp_out_grid", "dsp-outputs", "DSP\nOutputs",
       "DSP Outputs are used to send audio from the DSP after it has "
       "done its processing",
-      GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER, NULL,
+      1, PC_DSP,
+      GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER, NULL, NULL,
       &card->routing_dsp_out_grid
     );
   }
@@ -328,15 +403,18 @@ static void create_routing_grid(struct alsa_card *card) {
     mixer_in_container = create_routing_group_grid(
       card, "routing_mixer_in_grid", "mixer-inputs", "Mixer\nInputs",
       "Mixer Inputs are used to mix multiple audio channels together",
+      0, PC_MIX,
       GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER,
-      &card->routing_mixer_in_heading, &card->routing_mixer_in_grid
+      &card->routing_mixer_in_heading, NULL, &card->routing_mixer_in_grid
     );
   mixer_out_container = create_routing_group_grid(
     card, "routing_mixer_out_grid", "mixer-outputs",
     card->has_talkback ? "Mixer Outputs" : "Mixer\nOutputs",
     "Mixer Outputs are used to send audio from the mixer",
+    1, PC_MIX,
     GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER,
-    &card->routing_mixer_out_heading, &card->routing_mixer_out_grid
+    &card->routing_mixer_out_heading, &card->routing_mixer_out_heading_box,
+    &card->routing_mixer_out_grid
   );
 
   int left_col_num = 0;
@@ -377,6 +455,11 @@ static void create_routing_grid(struct alsa_card *card) {
 static GtkWidget *make_socket_widget(void) {
   GtkWidget *w = gtk_picture_new_for_resource(
     "/vu/b4/alsa-scarlett-gui/icons/socket.svg"
+  );
+  // the port menu has no visible affordance of its own, so the socket
+  // says that it is there
+  gtk_widget_set_tooltip_text(
+    w, "Right-click for options: stereo link, rename, hide"
   );
   gtk_widget_set_align(w, GTK_ALIGN_CENTER, GTK_ALIGN_CENTER);
   gtk_picture_set_can_shrink(GTK_PICTURE(w), FALSE);
@@ -419,7 +502,7 @@ static GtkOrientation get_socket_orientation(int port_category) {
 
 // Get stereo-aware base name for a source
 // Returns newly allocated string that must be freed
-static char *get_src_stereo_aware_name(struct routing_src *src) {
+char *get_src_stereo_aware_name(struct routing_src *src) {
   if (is_src_linked(src) && is_src_left_channel(src)) {
     if (src->port_category == PC_MIX)
       return g_strdup_printf(
@@ -436,7 +519,7 @@ static char *get_src_stereo_aware_name(struct routing_src *src) {
 
 // Get stereo-aware base name for a sink
 // Returns newly allocated string that must be freed
-static char *get_snk_stereo_aware_name(struct routing_snk *snk) {
+char *get_snk_stereo_aware_name(struct routing_snk *snk) {
   if (is_snk_linked(snk) && is_snk_left_channel(snk)) {
     // Mixer/DSP use simple abbreviated stereo labels in routing window
     int port_cat = snk->elem->port_category;
@@ -501,8 +584,10 @@ static int is_horiz_port_category(int port_category) {
 // Called before the routing window is destroyed.
 void cleanup_routing_widgets(struct alsa_card *card) {
   // Clear hover state to prevent dangling pointers
+  hide_hidden_peer_popover(card);
   card->hovered_src = NULL;
   card->hovered_snk = NULL;
+  card->routing_overlay = NULL;
 
   // Clean up source widgets
   if (card->routing_srcs) {
@@ -985,6 +1070,233 @@ static void queue_redraw_group_highlights(struct alsa_card *card) {
   }
 }
 
+// Get the channel a stereo pair is displayed as: the left channel when
+// linked, the port itself otherwise
+static struct routing_src *src_display_rep(struct routing_src *src) {
+  if (src && is_src_linked(src) && !is_src_left_channel(src)) {
+    struct routing_src *partner = get_src_partner(src);
+    if (partner)
+      return partner;
+  }
+
+  return src;
+}
+
+static struct routing_snk *snk_display_rep(struct routing_snk *snk) {
+  if (snk && is_snk_linked(snk) && !is_snk_left_channel(snk)) {
+    struct routing_snk *partner = get_snk_partner(snk);
+    if (partner)
+      return partner;
+  }
+
+  return snk;
+}
+
+// The hidden ports at the far end of a port's arrows: the sinks fed by a
+// source, or the source feeding a sink. Listed once per stereo pair, as
+// the channel the pair is displayed as.
+// Returns an array of struct routing_snk *, empty if there are none.
+static GPtrArray *get_hidden_snk_peers(
+  struct alsa_card   *card,
+  struct routing_src *src
+) {
+  GPtrArray *peers = g_ptr_array_new();
+
+  int ids[2];
+  int id_count = drop_off_ids(ids, get_src_ids(src, ids));
+
+  if (!id_count)
+    return peers;
+
+  for (int i = 0; i < card->routing_snks->len; i++) {
+    struct routing_snk *snk = &g_array_index(
+      card->routing_snks, struct routing_snk, i
+    );
+
+    // read-only mixer sinks have no lines and no arrows
+    if (snk->elem->port_category == PC_MIX && card->has_fixed_mixer_inputs)
+      continue;
+
+    if (is_routing_snk_enabled(snk))
+      continue;
+
+    if (snk_display_rep(snk) != snk)
+      continue;
+
+    int snk_ids[2];
+    int snk_id_count = get_snk_src_ids(snk, snk_ids);
+
+    if (ids_intersect(ids, id_count, snk_ids, snk_id_count))
+      g_ptr_array_add(peers, snk);
+  }
+
+  return peers;
+}
+
+// Returns an array of struct routing_src *, empty if the sink's source is
+// not hidden
+static GPtrArray *get_hidden_src_peers(
+  struct alsa_card   *card,
+  struct routing_snk *snk
+) {
+  GPtrArray *peers = g_ptr_array_new();
+
+  int ids[2];
+  int id_count = drop_off_ids(ids, get_snk_src_ids(snk, ids));
+
+  for (int i = 0; i < id_count; i++) {
+    struct routing_src *src = &g_array_index(
+      card->routing_srcs, struct routing_src, ids[i]
+    );
+
+    if (is_routing_src_enabled(src))
+      continue;
+
+    src = src_display_rep(src);
+
+    if (peers->len && g_ptr_array_index(peers, peers->len - 1) == src)
+      continue;
+
+    g_ptr_array_add(peers, src);
+  }
+
+  return peers;
+}
+
+// One name per line, or NULL if there are no peers
+static char *get_peer_names(GPtrArray *peers, int are_srcs) {
+  if (!peers->len)
+    return NULL;
+
+  GString *text = g_string_new(NULL);
+
+  for (int i = 0; i < peers->len; i++) {
+    char *name = are_srcs
+      ? get_src_qualified_name(g_ptr_array_index(peers, i))
+      : get_snk_qualified_name(g_ptr_array_index(peers, i));
+
+    if (text->len)
+      g_string_append_c(text, '\n');
+
+    g_string_append(text, name);
+    g_free(name);
+  }
+
+  return g_string_free(text, FALSE);
+}
+
+// Place the popover on the side the arrows point towards, so that it
+// stands where the hidden port would have been
+static GtkPositionType arrow_dir_position(int direction) {
+  switch (direction) {
+    case ARROW_DIR_RIGHT: return GTK_POS_RIGHT;
+    case ARROW_DIR_LEFT:  return GTK_POS_LEFT;
+    case ARROW_DIR_UP:    return GTK_POS_TOP;
+    default:              return GTK_POS_BOTTOM;
+  }
+}
+
+static void hide_hidden_peer_popover(struct alsa_card *card) {
+  if (!card->hidden_peer_popover)
+    return;
+
+  gtk_widget_unparent(card->hidden_peer_popover);
+  card->hidden_peer_popover = NULL;
+}
+
+// Name the ports on the far end of the hovered port's hidden connections
+static void show_hidden_peer_popover(struct alsa_card *card) {
+  GtkWidget *overlay = card->routing_overlay;
+
+  if (!overlay)
+    return;
+
+  GPtrArray *peers;
+  char *names;
+  const char *heading;
+  int direction;
+  graphene_rect_t bounds;
+
+  if (card->hovered_src) {
+    if (!get_src_bounds_relative(card->hovered_src, overlay, &bounds))
+      return;
+
+    peers = get_hidden_snk_peers(card, card->hovered_src);
+    names = get_peer_names(peers, 0);
+    heading = "Connected to:";
+    direction = routing_src_arrow_dir(card->hovered_src);
+
+  } else if (card->hovered_snk) {
+    if (!get_snk_bounds_relative(card->hovered_snk, overlay, &bounds))
+      return;
+
+    peers = get_hidden_src_peers(card, card->hovered_snk);
+    names = get_peer_names(peers, 1);
+    heading = "Connected from:";
+    direction = routing_snk_arrow_dir(card->hovered_snk);
+
+  } else {
+    return;
+  }
+
+  g_ptr_array_free(peers, TRUE);
+
+  if (!names)
+    return;
+
+  GtkWidget *popover = gtk_popover_new();
+
+  // the popover only reports; it must not take the pointer away from the
+  // hover and drag handling on the overlay below it
+  gtk_popover_set_autohide(GTK_POPOVER(popover), FALSE);
+  gtk_widget_set_can_target(popover, FALSE);
+  gtk_widget_set_can_focus(popover, FALSE);
+
+  gtk_widget_set_parent(popover, overlay);
+  gtk_popover_set_position(
+    GTK_POPOVER(popover), arrow_dir_position(direction)
+  );
+
+  GdkRectangle rect = {
+    .x      = bounds.origin.x,
+    .y      = bounds.origin.y,
+    .width  = bounds.size.width,
+    .height = bounds.size.height
+  };
+  gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+
+  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+
+  GtkWidget *heading_label = gtk_label_new(heading);
+  gtk_widget_add_css_class(heading_label, "dim-label");
+  gtk_widget_set_halign(heading_label, GTK_ALIGN_START);
+  gtk_box_append(GTK_BOX(box), heading_label);
+
+  GtkWidget *names_label = gtk_label_new(names);
+  g_free(names);
+  gtk_label_set_justify(GTK_LABEL(names_label), GTK_JUSTIFY_LEFT);
+  gtk_widget_set_halign(names_label, GTK_ALIGN_START);
+  gtk_box_append(GTK_BOX(box), names_label);
+
+  gtk_popover_set_child(GTK_POPOVER(popover), box);
+
+  card->hidden_peer_popover = popover;
+  gtk_popover_popup(GTK_POPOVER(popover));
+}
+
+// Redraw the highlights and lines for a changed hover, and show or hide
+// the popover naming the hidden ports the arrows point to
+static void update_routing_hover_ui(struct alsa_card *card) {
+  hide_hidden_peer_popover(card);
+
+  // during a drag the connections are still moving
+  if (card->drag_type == DRAG_TYPE_NONE)
+    show_hidden_peer_popover(card);
+
+  queue_redraw_group_highlights(card);
+  gtk_widget_queue_draw(card->routing_lines);
+}
+
 // Motion handler for overlay-based hover detection
 static void routing_overlay_motion(
   GtkEventControllerMotion *controller,
@@ -1054,8 +1366,7 @@ static void routing_overlay_motion(
       new_hovered_snk != card->hovered_snk) {
     card->hovered_src = new_hovered_src;
     card->hovered_snk = new_hovered_snk;
-    queue_redraw_group_highlights(card);
-    gtk_widget_queue_draw(card->routing_lines);
+    update_routing_hover_ui(card);
   }
 }
 
@@ -1069,8 +1380,7 @@ static void routing_overlay_leave(
   if (card->hovered_src || card->hovered_snk) {
     card->hovered_src = NULL;
     card->hovered_snk = NULL;
-    queue_redraw_group_highlights(card);
-    gtk_widget_queue_draw(card->routing_lines);
+    update_routing_hover_ui(card);
   }
 }
 
@@ -1144,21 +1454,167 @@ static struct routing_snk *find_snk_at_point(
   return NULL;
 }
 
+// Close the context menu popover a button belongs to
+static void popdown_popover(GtkButton *button) {
+  GtkWidget *popover = gtk_widget_get_ancestor(
+    GTK_WIDGET(button), GTK_TYPE_POPOVER
+  );
+
+  if (popover)
+    gtk_popover_popdown(GTK_POPOVER(popover));
+}
+
 // Callback for stereo link toggle button inside context menu popover
 static void link_popover_clicked(GtkButton *button, gpointer user_data) {
   struct alsa_elem *link_elem = user_data;
   int current = alsa_get_elem_value(link_elem);
   alsa_set_elem_value(link_elem, !current);
 
-  // Close the popover
+  popdown_popover(button);
+}
+
+// Callbacks for the hide button inside the port context menu popover
+static void hide_src_clicked(GtkButton *button, gpointer user_data) {
+  set_src_port_enabled(user_data, 0);
+  popdown_popover(button);
+}
+
+static void hide_snk_clicked(GtkButton *button, gpointer user_data) {
+  set_snk_port_enabled(user_data, 0);
+  popdown_popover(button);
+}
+
+// The name element the routing window's label for a port comes from: the
+// pair's when it is linked, the channel's own otherwise.
+// Mixer and DSP ports are labelled by position here, so their names are
+// only editable where they are shown.
+static struct alsa_elem *get_src_name_elem(struct routing_src *src) {
+  if (src->port_category == PC_MIX || src->port_category == PC_DSP)
+    return NULL;
+
+  if (is_src_linked(src)) {
+    struct alsa_elem *pair_elem = get_src_pair_name_elem(src_display_rep(src));
+
+    if (pair_elem)
+      return pair_elem;
+  }
+
+  return src->custom_name_elem;
+}
+
+static struct alsa_elem *get_snk_name_elem(struct routing_snk *snk) {
+  int port_category = snk->elem->port_category;
+
+  if (port_category == PC_MIX || port_category == PC_DSP)
+    return NULL;
+
+  if (is_snk_linked(snk)) {
+    struct alsa_elem *pair_elem = get_snk_pair_name_elem(snk_display_rep(snk));
+
+    if (pair_elem)
+      return pair_elem;
+  }
+
+  return snk->custom_name_elem;
+}
+
+// The rename entry replaces the buttons in the same popover
+struct rename_data {
+  GtkWidget *stack;
+  GtkWidget *page;
+  GtkWidget *entry;
+};
+
+// Enter finishes the rename, as Escape does; the name is saved as it is
+// typed, so there is nothing to commit
+static void rename_entry_activate(GtkEntry *entry, gpointer user_data) {
   GtkWidget *popover = gtk_widget_get_ancestor(
-    GTK_WIDGET(button), GTK_TYPE_POPOVER
+    GTK_WIDGET(entry), GTK_TYPE_POPOVER
   );
+
   if (popover)
     gtk_popover_popdown(GTK_POPOVER(popover));
 }
 
-// Right-click handler for stereo link context menu
+static void rename_clicked(GtkButton *button, gpointer user_data) {
+  struct rename_data *data = user_data;
+
+  gtk_stack_set_visible_child(GTK_STACK(data->stack), data->page);
+  gtk_widget_grab_focus(data->entry);
+}
+
+// Build the rename page: the name as it is displayed now, and an entry
+// bound to the element it comes from
+static GtkWidget *make_rename_page(
+  struct alsa_elem *name_elem,
+  char             *title
+) {
+  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+
+  GtkWidget *label = gtk_label_new(title);
+  gtk_widget_add_css_class(label, "heading");
+  gtk_widget_set_halign(label, GTK_ALIGN_START);
+  gtk_box_append(GTK_BOX(box), label);
+
+  GtkWidget *entry = make_text_entry_alsa_elem(name_elem);
+  g_signal_connect(entry, "activate", G_CALLBACK(rename_entry_activate), NULL);
+  gtk_widget_set_tooltip_text(
+    entry, "Clear the name to go back to the default"
+  );
+  gtk_box_append(GTK_BOX(box), entry);
+
+  g_object_set_data(G_OBJECT(box), "entry", entry);
+
+  return box;
+}
+
+// Callback for the show button inside the port context menu popover:
+// unhides the ports at the far end of this port's hidden connections
+struct show_peers_data {
+  GPtrArray *peers;
+  int        are_srcs;
+};
+
+static void show_peers_clicked(GtkButton *button, gpointer user_data) {
+  struct show_peers_data *data = user_data;
+
+  for (int i = 0; i < data->peers->len; i++) {
+    void *peer = g_ptr_array_index(data->peers, i);
+
+    if (data->are_srcs)
+      set_src_port_enabled(peer, 1);
+    else
+      set_snk_port_enabled(peer, 1);
+  }
+
+  popdown_popover(button);
+}
+
+static void show_peers_data_free(void *user_data) {
+  struct show_peers_data *data = user_data;
+
+  g_ptr_array_free(data->peers, TRUE);
+  g_free(data);
+}
+
+static GtkWidget *make_popover_button(
+  const char    *label,
+  const char    *tooltip,
+  GCallback      callback,
+  void          *user_data,
+  GClosureNotify destroy
+) {
+  GtkWidget *button = gtk_button_new_with_label(label);
+
+  gtk_widget_add_css_class(button, "flat");
+  if (tooltip)
+    gtk_widget_set_tooltip_text(button, tooltip);
+  g_signal_connect_data(button, "clicked", callback, user_data, destroy, 0);
+
+  return button;
+}
+
+// Right-click handler for the port context menu
 static void routing_overlay_right_click(
   GtkGestureClick *gesture,
   int              n_press,
@@ -1174,40 +1630,136 @@ static void routing_overlay_right_click(
   struct routing_src *r_src = find_src_at_point(card, widget, x, y);
   struct routing_snk *r_snk = find_snk_at_point(card, widget, x, y);
 
-  // Get the link element for the clicked source or sink
-  struct alsa_elem *link_elem = NULL;
-  int is_linked = 0;
-
-  if (r_src && src_has_valid_partner(r_src)) {
-    link_elem = get_src_link_elem(r_src);
-    is_linked = is_src_linked(r_src);
-  } else if (r_snk && snk_has_valid_partner(r_snk)) {
-    link_elem = get_snk_link_elem(r_snk);
-    is_linked = is_snk_linked(r_snk);
-  }
-
-  if (!link_elem)
+  if (!r_src && !r_snk)
     return;
 
-  // Create popover with a button
-  GtkWidget *popover = gtk_popover_new();
-  gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
-  gtk_widget_set_parent(popover, widget);
+  // Get the link, name, and enable elements for the clicked source or
+  // sink. Ports at the end of the numbering have no channel to pair with.
+  struct alsa_elem *link_elem = NULL;
+  struct alsa_elem *name_elem = NULL;
+  struct alsa_elem *enable_elem = NULL;
+  int is_linked = 0;
 
-  GdkRectangle rect = { .x = x, .y = y, .width = 1, .height = 1 };
-  gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+  if (r_src) {
+    if (src_has_valid_partner(r_src)) {
+      link_elem = get_src_link_elem(r_src);
+      is_linked = is_src_linked(r_src);
+    }
+    name_elem = get_src_name_elem(r_src);
+    enable_elem = get_src_enable_elem(r_src);
+  } else {
+    if (snk_has_valid_partner(r_snk)) {
+      link_elem = get_snk_link_elem(r_snk);
+      is_linked = is_snk_linked(r_snk);
+    }
+    name_elem = get_snk_name_elem(r_snk);
+    enable_elem = get_snk_enable_elem(r_snk);
+  }
 
-  GtkWidget *button = gtk_button_new_with_label(
-    is_linked ? "Unlink Stereo Pair" : "Link as Stereo Pair"
-  );
-  gtk_widget_add_css_class(button, "flat");
-  g_signal_connect(button, "clicked",
-    G_CALLBACK(link_popover_clicked), link_elem);
-  gtk_popover_set_child(GTK_POPOVER(popover), button);
+  if (!link_elem && !name_elem && !enable_elem)
+    return;
 
-  g_signal_connect(popover, "closed",
-    G_CALLBACK(gtk_widget_unparent), NULL);
+  // the hidden ports this one is connected to, named by the popover shown
+  // while hovering it
+  GPtrArray *peers = r_src
+    ? get_hidden_snk_peers(card, r_src)
+    : get_hidden_src_peers(card, r_snk);
 
+  // the rename entry takes the place of the buttons in the same popover,
+  // which shrinks to fit it
+  GtkWidget *stack = gtk_stack_new();
+  gtk_stack_set_hhomogeneous(GTK_STACK(stack), FALSE);
+  gtk_stack_set_vhomogeneous(GTK_STACK(stack), FALSE);
+  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
+  if (link_elem)
+    gtk_box_append(
+      GTK_BOX(box),
+      make_popover_button(
+        is_linked ? "Unlink Stereo Pair" : "Link as Stereo Pair",
+        NULL, G_CALLBACK(link_popover_clicked), link_elem, NULL
+      )
+    );
+
+  GtkWidget *rename_page = NULL;
+
+  if (name_elem) {
+    char *title = r_src
+      ? get_src_stereo_aware_name(r_src)
+      : get_snk_stereo_aware_name(r_snk);
+
+    rename_page = make_rename_page(name_elem, title);
+    g_free(title);
+
+    struct rename_data *data = g_new0(struct rename_data, 1);
+    data->stack = stack;
+    data->page = rename_page;
+    data->entry = g_object_get_data(G_OBJECT(rename_page), "entry");
+
+    gtk_box_append(
+      GTK_BOX(box),
+      make_popover_button(
+        "Rename\xe2\x80\xa6",
+        "Give this port a name of your own",
+        G_CALLBACK(rename_clicked), data, (GClosureNotify)g_free
+      )
+    );
+  }
+
+  if (peers->len) {
+    char *label;
+    const char *tooltip;
+
+    if (peers->len == 1) {
+      char *name = r_src
+        ? get_snk_qualified_name(g_ptr_array_index(peers, 0))
+        : get_src_qualified_name(g_ptr_array_index(peers, 0));
+
+      label = g_strdup_printf("Show %s", name);
+      tooltip = "Show the hidden port at the other end of this connection";
+      g_free(name);
+    } else {
+      label = g_strdup("Show Connected Ports");
+      tooltip = "Show the hidden ports at the other end of the connections "
+                "to this port";
+    }
+
+    struct show_peers_data *data = g_new0(struct show_peers_data, 1);
+    data->peers = peers;
+    data->are_srcs = !!r_snk;
+
+    gtk_box_append(
+      GTK_BOX(box),
+      make_popover_button(
+        label, tooltip,
+        G_CALLBACK(show_peers_clicked), data,
+        (GClosureNotify)show_peers_data_free
+      )
+    );
+    g_free(label);
+  } else {
+    g_ptr_array_free(peers, TRUE);
+  }
+
+  if (enable_elem)
+    gtk_box_append(
+      GTK_BOX(box),
+      make_popover_button(
+        "Hide",
+        "Hide this port. Any connection to it is kept, and shown by an "
+        "arrow on the port at the other end.",
+        r_src ? G_CALLBACK(hide_src_clicked) : G_CALLBACK(hide_snk_clicked),
+        r_src ? (void *)r_src : (void *)r_snk,
+        NULL
+      )
+    );
+
+  gtk_stack_add_named(GTK_STACK(stack), box, "menu");
+  if (rename_page)
+    gtk_stack_add_named(GTK_STACK(stack), rename_page, "rename");
+
+  GtkWidget *popover = routing_menu_popover_new(widget, x, y);
+  gtk_popover_set_child(GTK_POPOVER(popover), stack);
   gtk_popover_popup(GTK_POPOVER(popover));
 }
 
@@ -1282,6 +1834,10 @@ static GdkContentProvider *routing_drag_prepare(
   struct routing_src *r_src = find_src_at_point(card, widget, x, y);
   struct routing_snk *r_snk = find_snk_at_point(card, widget, x, y);
 
+  // the connections are about to move, so stop naming their far ends
+  if (r_src || r_snk)
+    hide_hidden_peer_popover(card);
+
   if (r_src) {
     card->drag_type = DRAG_TYPE_SRC;
     card->src_drag = r_src;
@@ -1345,9 +1901,8 @@ static void routing_drag_end(
   card->drag_x = -1;
   card->drag_y = -1;
 
-  queue_redraw_group_highlights(card);
+  update_routing_hover_ui(card);
   gtk_widget_queue_draw(card->drag_line);
-  gtk_widget_queue_draw(card->routing_lines);
 }
 
 // Drop target motion handler - hit-test for drop feedback
@@ -1371,18 +1926,16 @@ static GdkDragAction routing_drop_motion(
     card->snk_drag = r_snk;
     card->hovered_snk = r_snk;
     card->hovered_src = NULL;
-    queue_redraw_group_highlights(card);
+    update_routing_hover_ui(card);
     gtk_widget_queue_draw(card->drag_line);
-    gtk_widget_queue_draw(card->routing_lines);
     return GDK_ACTION_COPY;
   } else if (card->drag_type == DRAG_TYPE_SNK && r_src &&
              is_routing_valid(card, r_src, card->snk_drag)) {
     card->src_drag = r_src;
     card->hovered_src = r_src;
     card->hovered_snk = NULL;
-    queue_redraw_group_highlights(card);
+    update_routing_hover_ui(card);
     gtk_widget_queue_draw(card->drag_line);
-    gtk_widget_queue_draw(card->routing_lines);
     return GDK_ACTION_COPY;
   }
 
@@ -1395,9 +1948,8 @@ static GdkDragAction routing_drop_motion(
     card->hovered_src = NULL;
   }
 
-  queue_redraw_group_highlights(card);
+  update_routing_hover_ui(card);
   gtk_widget_queue_draw(card->drag_line);
-  gtk_widget_queue_draw(card->routing_lines);
   return 0;
 }
 
@@ -1416,9 +1968,8 @@ static void routing_drop_leave(
     card->hovered_src = NULL;
   }
 
-  queue_redraw_group_highlights(card);
+  update_routing_hover_ui(card);
   gtk_widget_queue_draw(card->drag_line);
-  gtk_widget_queue_draw(card->routing_lines);
 }
 
 // Drop target drop handler - perform the routing connection
@@ -2097,8 +2648,10 @@ static void add_routing_widgets(
       "Mixer Input 25 internally raised and lowered when the "
       "Talkback control is turned On and Off."
     );
-    GtkWidget *container = gtk_widget_get_parent(card->routing_mixer_out_heading);
-    gtk_box_append(GTK_BOX(container), l_talkback);
+    gtk_box_append(
+      GTK_BOX(card->routing_mixer_out_heading_box), l_talkback
+    );
+    card->routing_talkback_label = l_talkback;
   }
 
   card->routing_lines = gtk_drawing_area_new();
@@ -2178,6 +2731,7 @@ GtkWidget *create_routing_controls(struct alsa_card *card) {
   gtk_widget_add_css_class(routing_overlay, "window-content");
   gtk_widget_add_css_class(routing_overlay, "window-routing");
   gtk_frame_set_child(GTK_FRAME(top), routing_overlay);
+  card->routing_overlay = routing_overlay;
 
   gtk_overlay_set_child(GTK_OVERLAY(routing_overlay), card->routing_grid);
 

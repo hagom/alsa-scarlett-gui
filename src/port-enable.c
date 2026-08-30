@@ -143,13 +143,27 @@ static void update_sinks_label(struct alsa_card *card) {
   gtk_label_set_text(GTK_LABEL(card->routing_snk_label), text);
 }
 
-// Helper to set visibility on a grid's parent container
-static void set_grid_container_visible(GtkWidget *grid, int visible) {
+// Show or hide a group's ports (grid → overlay → container), keeping the
+// heading so that its menu stays reachable when everything is hidden
+static void set_group_ports_visible(GtkWidget *grid, int visible) {
   if (!grid)
     return;
-  GtkWidget *container = gtk_widget_get_parent(grid);
-  if (container)
-    gtk_widget_set_visible(container, visible);
+
+  GtkWidget *overlay = gtk_widget_get_parent(grid);
+  if (!overlay)
+    return;
+
+  gtk_widget_set_visible(overlay, visible);
+
+  GtkWidget *container = gtk_widget_get_parent(overlay);
+  if (!container)
+    return;
+
+  // dim the heading so that an emptied group reads as deliberate
+  if (visible)
+    gtk_widget_remove_css_class(container, "empty-group");
+  else
+    gtk_widget_add_css_class(container, "empty-group");
 }
 
 // Update visibility of routing section grids based on port enable states
@@ -158,44 +172,47 @@ void update_routing_section_visibility(struct alsa_card *card) {
     return;
 
   // Hardware Inputs
-  set_grid_container_visible(
+  set_group_ports_visible(
     card->routing_hw_in_grid, !all_sources_disabled(card, PC_HW)
   );
 
   // Hardware Outputs
-  set_grid_container_visible(
+  set_group_ports_visible(
     card->routing_hw_out_grid, !all_sinks_disabled(card, PC_HW)
   );
 
   // PCM Inputs (sources - to PC)
-  set_grid_container_visible(
+  set_group_ports_visible(
     card->routing_pcm_in_grid, !all_sources_disabled(card, PC_PCM)
   );
 
   // PCM Outputs (sinks - from PC)
-  set_grid_container_visible(
+  set_group_ports_visible(
     card->routing_pcm_out_grid, !all_sinks_disabled(card, PC_PCM)
   );
 
   // DSP Inputs (sinks)
-  set_grid_container_visible(
+  set_group_ports_visible(
     card->routing_dsp_in_grid, !all_sinks_disabled(card, PC_DSP)
   );
 
   // DSP Outputs (sources)
-  set_grid_container_visible(
+  set_group_ports_visible(
     card->routing_dsp_out_grid, !all_sources_disabled(card, PC_DSP)
   );
 
   // Mixer Inputs (sinks)
-  set_grid_container_visible(
+  set_group_ports_visible(
     card->routing_mixer_in_grid, !all_sinks_disabled(card, PC_MIX)
   );
 
-  // Mixer Outputs (sources)
-  set_grid_container_visible(
-    card->routing_mixer_out_grid, !all_sources_disabled(card, PC_MIX)
-  );
+  // Mixer Outputs (sources), and the Talkback label beside the heading
+  int has_mixer_outs = !all_sources_disabled(card, PC_MIX);
+
+  set_group_ports_visible(card->routing_mixer_out_grid, has_mixer_outs);
+
+  if (card->routing_talkback_label)
+    gtk_widget_set_visible(card->routing_talkback_label, has_mixer_outs);
 
   // Update the Sources and Sinks label arrows
   update_sources_label(card);
@@ -517,6 +534,36 @@ int is_routing_snk_enabled(struct routing_snk *snk) {
     return 1;  // default to enabled if no element
 
   return alsa_get_elem_value(snk->enable_elem) != 0;
+}
+
+// Show or hide a routing source and its stereo partner
+void set_src_port_enabled(struct routing_src *src, int enabled) {
+  if (!src || !src->enable_elem)
+    return;
+
+  alsa_set_elem_value(src->enable_elem, enabled);
+
+  if (!is_src_linked(src))
+    return;
+
+  struct routing_src *partner = get_src_partner(src);
+  if (partner && partner->enable_elem)
+    alsa_set_elem_value(partner->enable_elem, enabled);
+}
+
+// Show or hide a routing sink and its stereo partner
+void set_snk_port_enabled(struct routing_snk *snk, int enabled) {
+  if (!snk || !snk->enable_elem)
+    return;
+
+  alsa_set_elem_value(snk->enable_elem, enabled);
+
+  if (!is_snk_linked(snk))
+    return;
+
+  struct routing_snk *partner = get_snk_partner(snk);
+  if (partner && partner->enable_elem)
+    alsa_set_elem_value(partner->enable_elem, enabled);
 }
 
 // Get the enable element for a routing source

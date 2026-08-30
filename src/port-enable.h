@@ -20,6 +20,10 @@ int is_routing_src_enabled(struct routing_src *src);
 // Returns 1 if enabled, 0 if disabled
 int is_routing_snk_enabled(struct routing_snk *snk);
 
+// Show or hide a routing port, keeping a stereo-linked pair together
+void set_src_port_enabled(struct routing_src *src, int enabled);
+void set_snk_port_enabled(struct routing_snk *snk, int enabled);
+
 // Get the enable element for a routing source
 // Returns NULL if not available
 struct alsa_elem *get_src_enable_elem(struct routing_src *src);

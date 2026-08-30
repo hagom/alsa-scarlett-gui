@@ -9,6 +9,11 @@
 
 GtkWidget *create_routing_controls(struct alsa_card *card);
 
+// Stereo-aware display names as shown in the routing window.
+// Returns a newly allocated string that must be freed.
+char *get_src_stereo_aware_name(struct routing_src *src);
+char *get_snk_stereo_aware_name(struct routing_snk *snk);
+
 // Update hardware output label to show monitor group status (Main/Alt indicators)
 void update_hw_output_label(struct routing_snk *r_snk);
 
