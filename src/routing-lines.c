@@ -147,9 +147,20 @@ static void arrow(
   cairo_close_path(cr);
 }
 
+// Direction the hidden-connection arrow points for a source: mixer/DSP
+// sources sit along the bottom, the others down the left side
+int routing_src_arrow_dir(struct routing_src *r_src) {
+  return IS_MIXER(r_src->port_category) ? ARROW_DIR_UP : ARROW_DIR_RIGHT;
+}
+
+// Direction the hidden-connection arrow points for a sink: mixer/DSP
+// sinks sit along the top, the others down the right side
+int routing_snk_arrow_dir(struct routing_snk *r_snk) {
+  return IS_MIXER(r_snk->elem->port_category) ? ARROW_DIR_DOWN : ARROW_DIR_LEFT;
+}
+
 // draw a small arrow indicator pointing in a direction from a port
 // port_x, port_y: center of the port widget
-// direction: 0 = right (→), 1 = left (←), 2 = up (↑), 3 = down (↓)
 static void draw_arrow_indicator(
   cairo_t *cr,
   double   port_x,
@@ -162,11 +173,11 @@ static void draw_arrow_indicator(
 ) {
   double angle;
   switch (direction) {
-    case 0: angle = 0;          break;  // right →
-    case 1: angle = M_PI;       break;  // left ←
-    case 2: angle = -M_PI_2;    break;  // up ↑
-    case 3: angle = M_PI_2;     break;  // down ↓
-    default: angle = 0;         break;
+    case ARROW_DIR_RIGHT: angle = 0;       break;
+    case ARROW_DIR_LEFT:  angle = M_PI;    break;
+    case ARROW_DIR_UP:    angle = -M_PI_2; break;
+    case ARROW_DIR_DOWN:  angle = M_PI_2;  break;
+    default:              angle = 0;       break;
   }
 
   // arrow dimensions
@@ -704,8 +715,7 @@ void draw_routing_lines(
       double x, y;
       get_snk_center(r_snk, parent, &x, &y);
 
-      // mixer/DSP sinks are at bottom, others are on right side
-      int direction = IS_MIXER(elem->port_category) ? 3 : 1;
+      int direction = routing_snk_arrow_dir(r_snk);
 
       double level_db = get_routing_src_level_db(card, r_src);
       draw_arrow_indicator(cr, x, y, direction, 0.75, 0.25, 0.25, level_db);
@@ -733,8 +743,7 @@ void draw_routing_lines(
     double x, y;
     get_src_center(r_src, parent, &x, &y);
 
-    // mixer/DSP sources are at top, others are on left side
-    int direction = IS_MIXER(r_src->port_category) ? 2 : 0;
+    int direction = routing_src_arrow_dir(r_src);
 
     double level_db = get_routing_src_level_db(card, r_src);
     draw_arrow_indicator(cr, x, y, direction, 0.75, 0.25, 0.25, level_db);
