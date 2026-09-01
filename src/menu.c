@@ -140,9 +140,22 @@ static void activate_hardware(
   toggle_visibility(action, window_hardware);
 }
 
-// Render a card window to a PNG file, named by "main" or a subwindow
-// action name (routing/mixer/levels/configuration/dsp); used for
-// documentation screenshots
+// Set a documentation action's outcome state: empty when it worked, and
+// otherwise why it did not, so a script driving the action is told what
+// went wrong instead of having to read this process's stderr.
+static void set_outcome(GSimpleAction *action, char *reason) {
+  g_simple_action_set_state(
+    action, g_variant_new_take_string(reason ? reason : g_strdup(""))
+  );
+}
+
+/* Render a card window to a PNG file, named by "main" or a subwindow
+ * action name (routing/mixer/levels/configuration/dsp); used for
+ * documentation screenshots. The action's state reports the outcome:
+ * a window the compositor will not bring forward has no frame to
+ * capture, and a script needs to be told that rather than left to
+ * guess why no file appeared.
+ */
 static void activate_screenshot(
   GSimpleAction *action,
   GVariant      *parameter,
@@ -160,13 +173,15 @@ static void activate_screenshot(
     window = entry ? get_card_window(card, entry->window_offset) : NULL;
   }
 
-  if (!window)
+  if (!window) {
+    set_outcome(action, g_strdup_printf("no %s window", name));
     return;
+  }
 
   char *reason = NULL;
   if (!screenshot_widget_to_png(window, path, &reason)) {
     fprintf(stderr, "can't capture %s to %s: %s\n", name, path, reason);
-    g_free(reason);
+    set_outcome(action, reason);
     return;
   }
 
@@ -179,7 +194,12 @@ static void activate_screenshot(
     json_path = g_strconcat(path, ".json", NULL);
 
   char *image_name = g_path_get_basename(path);
-  export_widget_geometry_to_json(window, image_name, json_path);
+  gboolean exported =
+    export_widget_geometry_to_json(window, image_name, json_path);
+
+  set_outcome(action, exported
+    ? NULL
+    : g_strdup_printf("captured %s but wrote no geometry sidecar", path));
 
   g_free(image_name);
   g_free(json_path);
@@ -202,9 +222,34 @@ static void activate_save_config(
     fprintf(stderr, "can't save configuration to %s\n", path);
 }
 
+// Load a complete configuration from the given path. Unlike win.load
+// this takes a path and shows no dialogue, so a script that has changed
+// controls can put the card back as it found it. The native format
+// carries the interface's own state as well as the device's, so this
+// restores stereo links, port names and port visibility, which loading
+// an ALSA state file cannot. The action's state reports the outcome,
+// empty when the configuration was loaded: a script restoring the card
+// to how it found it needs to know whether that happened.
+static void activate_load_config(
+  GSimpleAction *action,
+  GVariant      *parameter,
+  gpointer       data
+) {
+  struct alsa_card *card = data;
+  const char *path;
+  g_variant_get(parameter, "&s", &path);
+
+  set_outcome(action, load_native(card, path) < 0
+    ? g_strdup_printf("can't load configuration from %s", path)
+    : NULL);
+}
+
 // Set a control's value by name, as if the user had changed it in the
 // UI, so documentation tooling can capture before/after states such as
-// stereo link, port visibility, and custom names.
+// stereo link, port visibility, and custom names. The action's state
+// reports the outcome, empty when the write was made: a name absent on
+// this model would otherwise be indistinguishable from a change that
+// took effect.
 static void activate_set_control(
   GSimpleAction *action,
   GVariant      *parameter,
@@ -214,7 +259,99 @@ static void activate_set_control(
   const char *name, *value;
   g_variant_get(parameter, "(&s&s)", &name, &value);
 
-  alsa_set_elem_by_name(card, name, value);
+  set_outcome(action, alsa_set_elem_by_name(card, name, value)
+    ? NULL
+    : g_strdup_printf("no control named %s", name));
+}
+
+/* Report a control's value by name into the action's state, so a script
+ * can wait for a set-control to have taken effect rather than guess at a
+ * delay. The value read is the one the interface holds, which for a real
+ * card is updated when the driver's change event arrives, so it reflects
+ * a write only once the interface has acted on it.
+ *
+ * The state is (found, value): a control with no custom name set reads
+ * as empty, which a single string could not tell apart from a name that
+ * does not exist on this model.
+ */
+static void activate_get_control(
+  GSimpleAction *action,
+  GVariant      *parameter,
+  gpointer       data
+) {
+  struct alsa_card *card = data;
+  const char *name;
+  g_variant_get(parameter, "&s", &name);
+
+  struct alsa_elem *elem = get_elem_by_name(card->elems, name);
+  char *value;
+
+  if (!elem) {
+    value = g_strdup("");
+
+  } else if (elem->type == SND_CTL_ELEM_TYPE_BYTES) {
+    size_t size = 0;
+    const void *bytes = alsa_get_elem_bytes(elem, &size);
+
+    // a byte control need not hold text, and a GVariant string that is
+    // not valid UTF-8 aborts the process
+    char *raw = bytes ? g_strndup(bytes, size) : g_strdup("");
+
+    value = g_utf8_make_valid(raw, -1);
+    g_free(raw);
+
+  } else if (elem->count > 1) {
+
+    // the cached value is refreshed by the change event for
+    // single-valued elements only, so read the rest from the card
+    long *values = alsa_get_elem_int_values(elem);
+    GString *joined = g_string_new(NULL);
+
+    for (int i = 0; values && i < elem->count; i++)
+      g_string_append_printf(joined, i ? " %ld" : "%ld", values[i]);
+
+    g_free(values);
+
+    value = g_string_free(joined, FALSE);
+
+  } else {
+    value = g_strdup_printf("%ld", elem->value);
+  }
+
+  g_simple_action_set_state(
+    action, g_variant_new("(bs)", elem != NULL, value)
+  );
+
+  g_free(value);
+}
+
+// List the card's control names into the action's state, so a script can
+// choose targets that exist on this model instead of assuming a
+// particular one. The list covers the interface's own optional elements
+// — stereo link, port name and port visibility — which are not kernel
+// controls and so cannot be found through ALSA.
+static void activate_list_controls(
+  GSimpleAction *action,
+  GVariant      *parameter,
+  gpointer       data
+) {
+  struct alsa_card *card = data;
+
+  GPtrArray *names = g_ptr_array_new();
+
+  for (int i = 0; i < card->elems->len; i++) {
+    struct alsa_elem *elem = g_ptr_array_index(card->elems, i);
+
+    if (elem->card && elem->name)
+      g_ptr_array_add(names, elem->name);
+  }
+  g_ptr_array_add(names, NULL);
+
+  g_simple_action_set_state(
+    action, g_variant_new_strv((const char * const *)names->pdata, -1)
+  );
+
+  g_ptr_array_free(names, TRUE);
 }
 
 static void activate_quit(
@@ -339,9 +476,12 @@ void add_load_save_action_map(struct alsa_card *card) {
 }
 
 static const GActionEntry screenshot_entries[] = {
-  {"screenshot",  activate_screenshot,  "(ss)"},
-  {"set-control", activate_set_control, "(ss)"},
-  {"save-config", activate_save_config, "s"}
+  {"screenshot",    activate_screenshot,    "(ss)", "''"},
+  {"set-control",   activate_set_control,   "(ss)", "''"},
+  {"get-control",   activate_get_control,   "s",    "(false, '')"},
+  {"list-controls", activate_list_controls, NULL,   "@as []"},
+  {"save-config",   activate_save_config,   "s"},
+  {"load-config",   activate_load_config,   "s",    "''"}
 };
 
 void add_screenshot_action_map(struct alsa_card *card) {
