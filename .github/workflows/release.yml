@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to build (e.g., 1.0-rc1)'
+        description: 'Version to build (e.g., 1.0beta1)'
         required: true
         default: 'test'
 
@@ -35,10 +35,10 @@ jobs:
           gtk4-devel alsa-lib-devel openssl-devel
 
       - name: Build RPM
-        run: |
-          VERSION=$(echo "${{ env.APP_VERSION }}" | sed 's/-rc/~rc/g')
-          make rpm VERSION="$VERSION"
+        run: make rpm VERSION=${{ env.APP_VERSION }}
 
+      # rpmbuild names the file after the package version, which gains a
+      # tilde for a pre-release tag. The asset keeps the tag.
       - name: Find and rename RPM
         id: find-rpm
         run: |
@@ -69,42 +69,21 @@ jobs:
           sudo apt -y update
           sudo apt -y install make gcc libgtk-4-dev libasound2-dev libssl-dev
 
-      - name: Build from sources
-        run: make -C src -j$(nproc) VERSION=${{ env.APP_VERSION }} PREFIX=/usr
+      - name: Build deb
+        run: make deb VERSION=${{ env.APP_VERSION }}
 
-      - name: Prepare package workspace
-        run: |
-          mkdir -p deb-workspace/usr/bin \
-                   deb-workspace/usr/share/applications \
-                   deb-workspace/usr/share/icons/hicolor/256x256/apps \
-                   deb-workspace/usr/share/doc/${{ env.APP_NAME }}
-          cp src/alsa-scarlett-gui deb-workspace/usr/bin/
-          cp src/vu.b4.alsa-scarlett-gui.desktop \
-            deb-workspace/usr/share/applications/
-          cp src/img/vu.b4.alsa-scarlett-gui.png \
-            deb-workspace/usr/share/icons/hicolor/256x256/apps/
-          cp -r *.md demo docs img deb-workspace/usr/share/doc/${{ env.APP_NAME }}/
-
-      - name: Build debian package
-        uses: jiro4989/build-deb-action@v2
-        with:
-          package: ${{ env.APP_NAME }}
-          package_root: deb-workspace
-          maintainer: geoffreybennett
-          depends: 'libgtk-4-1, libasound2, alsa-utils'
-          version: ${{ env.APP_VERSION }}
-          desc: >
-            Gtk4 GUI for the ALSA controls presented by the Linux kernel
-            Focusrite USB drivers.
+      - name: Find deb
+        id: find-deb
+        run: echo "deb_path=$(ls ${{ env.APP_NAME }}_*.deb | head -1)" >> $GITHUB_OUTPUT
 
       - name: Upload deb as artifact
         uses: actions/upload-artifact@v4
         with:
           name: deb-package
-          path: ./${{ env.APP_NAME }}_${{ env.APP_VERSION }}_amd64.deb
+          path: ${{ steps.find-deb.outputs.deb_path }}
 
       - name: Upload deb to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: ./${{ env.APP_NAME }}_${{ env.APP_VERSION }}_amd64.deb
+          files: ${{ steps.find-deb.outputs.deb_path }}

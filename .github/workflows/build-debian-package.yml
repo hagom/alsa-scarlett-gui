@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to build (e.g., 1.0~rc1)'
+        description: 'Version to build (e.g., 1.0beta1)'
         required: true
         default: 'test'
 
@@ -26,8 +26,12 @@ jobs:
       - name: Build deb
         run: make deb VERSION=${{ env.APP_VERSION }}
 
+      - name: Find deb
+        id: find-deb
+        run: echo "deb_path=$(ls ${{ env.APP_NAME }}_*.deb | head -1)" >> $GITHUB_OUTPUT
+
       - name: Upload deb as artifact
         uses: actions/upload-artifact@v4
         with:
           name: deb-package
-          path: ./${{ env.APP_NAME }}_${{ env.APP_VERSION }}.deb
+          path: ${{ steps.find-deb.outputs.deb_path }}

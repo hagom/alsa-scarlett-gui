@@ -1,23 +1,32 @@
+%global tag_version TAG_VERSION
+
 Summary:        ALSA Scarlett Control Panel
 Name:           alsa-scarlett-gui
+Epoch:          EPOCH
 Version:        VERSION
 Release:        1%{?dist}
 License:        GPLv3+ LGPLv3+
 Url:            https://github.com/geoffreybennett/alsa-scarlett-gui
-Source0:        https://github.com/geoffreybennett/alsa-scarlett-gui/archive/refs/tags/%{version}.tar.gz?/%{name}-%{version}.tar.gz
+Source0:        https://github.com/geoffreybennett/alsa-scarlett-gui/archive/refs/tags/%{tag_version}.tar.gz?/%{name}-%{tag_version}.tar.gz
 BuildRequires:  pkgconfig(alsa)
 BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(openssl)
+
+# alsactl saves and restores configuration files
+Requires:       alsa-utils
 
 %description
 alsa-scarlett-gui is a Gtk4 GUI for the ALSA controls presented by the
 Linux kernel Focusrite USB drivers.
 
 %prep
-%setup -q -n %{name}-%{version}/src
+%setup -q -n %{name}-%{tag_version}/src
 
 %build
-%make_build VERSION=%{version} PREFIX=%{_prefix}
+# %{version} carries a tilde for rpm's ordering of pre-releases. The
+# binary reports the tag, which is how the online update index names
+# versions.
+%make_build VERSION=%{tag_version} PREFIX=%{_prefix}
 
 %install
 %make_install PREFIX=%{_prefix}
