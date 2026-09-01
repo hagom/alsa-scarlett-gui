@@ -14,6 +14,7 @@
 #include "stereo-link.h"
 #include "stringhelper.h"
 #include "widget-gain.h"
+#include "widget-rotated-label.h"
 #include "window-geometry.h"
 #include "window-mixer.h"
 
@@ -35,11 +36,6 @@ static void rotated_label_info_free(gpointer data) {
   g_free(info->text);
   g_free(info);
 }
-
-// rotation angle for mixer input labels
-#define LABEL_ANGLE (G_PI / 6.0)  // 30°
-#define LABEL_SIN 0.5                       // sin(30°)
-#define LABEL_COS 0.86602540378443864676    // cos(30°)
 
 // vertical padding for rotated label anchor
 #define LABEL_VERTICAL_PAD 5
@@ -151,14 +147,14 @@ static gboolean compute_label_anchor(
     // text_h * sin, so shift anchor left to stay within cell;
     // additional inset moves text further left within cell
     out->anchor_x =
-      out->br.x - text_h * LABEL_SIN - inset;
+      out->br.x - text_h * ROTATED_LABEL_SIN - inset;
     out->anchor_y = out->tl.y + LABEL_VERTICAL_PAD;
   } else {
     // text bottom-left at cell bottom-left; body extends down
     // by text_h * cos, so shift anchor up to stay within cell;
     // additional inset moves text further right within cell
     out->anchor_x = out->tl.x + inset;
-    out->anchor_y = out->br.y - text_h * LABEL_COS;
+    out->anchor_y = out->br.y - text_h * ROTATED_LABEL_COS;
   }
 
   return TRUE;
@@ -194,9 +190,9 @@ static gboolean get_rotated_label_centre(
     ? -info->text_w / 2.0 : info->text_w / 2.0;
   double ty = info->text_h / 2.0;
 
-  // rotate by -LABEL_ANGLE and translate to anchor
-  *cx = anchor.anchor_x + tx * LABEL_COS + ty * LABEL_SIN;
-  *cy = anchor.anchor_y - tx * LABEL_SIN + ty * LABEL_COS;
+  // rotate by -ROTATED_LABEL_ANGLE and translate to anchor
+  *cx = anchor.anchor_x + tx * ROTATED_LABEL_COS + ty * ROTATED_LABEL_SIN;
+  *cy = anchor.anchor_y - tx * ROTATED_LABEL_SIN + ty * ROTATED_LABEL_COS;
   return TRUE;
 }
 
@@ -293,7 +289,7 @@ static void draw_rotated_label_glow(
 
   cairo_save(cr);
   cairo_translate(cr, cx, cy);
-  cairo_rotate(cr, -LABEL_ANGLE);
+  cairo_rotate(cr, -ROTATED_LABEL_ANGLE);
   draw_glow_at(cr, 0, 0, MIXER_GLOW_MAX_WIDTH, level_db);
   cairo_restore(cr);
 }
@@ -313,7 +309,7 @@ static void draw_rotated_stereo_label_glow(
 
   cairo_save(cr);
   cairo_translate(cr, cx, cy);
-  cairo_rotate(cr, -LABEL_ANGLE);
+  cairo_rotate(cr, -ROTATED_LABEL_ANGLE);
   draw_glow_bar_outward(cr, 0, 0, MIXER_GLOW_MAX_WIDTH, level_db_l, -1);
   draw_glow_bar_outward(cr, 0, 0, MIXER_GLOW_MAX_WIDTH, level_db_r, +1);
   cairo_restore(cr);
@@ -688,7 +684,7 @@ static void draw_snk_label(
 
   cairo_save(cr);
   cairo_translate(cr, anchor.anchor_x, anchor.anchor_y);
-  cairo_rotate(cr, -LABEL_ANGLE);
+  cairo_rotate(cr, -ROTATED_LABEL_ANGLE);
 
   // shift text left so it ends (right edge) at the anchor column
   if (is_bottom)
@@ -799,8 +795,8 @@ static void set_rotated_label_text(
   double effective_w = MAX(info->text_w, glow_w);
 
   int required_h = (int)ceil(
-    effective_w * LABEL_SIN +
-    info->text_h * LABEL_COS
+    effective_w * ROTATED_LABEL_SIN +
+    info->text_h * ROTATED_LABEL_COS
   );
   gtk_widget_set_size_request(widget, 1, required_h);
 }
@@ -1511,7 +1507,7 @@ void rebuild_mixer_grid(struct alsa_card *card) {
     }
 
     int spacer_w = (int)ceil(
-      last_text_w * LABEL_COS - 37  // 75% of 50, the minimum dial width
+      last_text_w * ROTATED_LABEL_COS - 37  // 75% of 50, the minimum dial width
     );
     if (spacer_w < 0)
       spacer_w = 0;

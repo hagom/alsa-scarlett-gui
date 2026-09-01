@@ -206,25 +206,13 @@ static void src_custom_name_display_changed(
     }
   }
 
-  // update talkback button label in routing window if it exists
-  // talkback buttons use abbreviated stereo-aware names (A, B, A–B)
+  // the talkback button takes the label's place in the routing window,
+  // so it carries the mixer output's name
   if (src->talkback_widget && src->port_category == PC_MIX) {
-    char *formatted_name;
+    char *name = get_src_letter_name(src);
 
-    if (is_src_linked(src) && is_src_left_channel(src)) {
-      // linked: show "A–B" format
-      formatted_name = g_strdup_printf(
-        "%c\xe2\x80\x93%c", src->port_num + 'A', src->port_num + 'B'
-      );
-    } else {
-      // not linked: show single letter
-      formatted_name = g_strdup_printf("%c", src->port_num + 'A');
-    }
-
-    boolean_widget_update_labels(
-      src->talkback_widget, formatted_name, formatted_name
-    );
-    g_free(formatted_name);
+    boolean_widget_update_labels(src->talkback_widget, name, name);
+    g_free(name);
   }
 
   update_routing_src_label(src);

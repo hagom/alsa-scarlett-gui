@@ -10,6 +10,7 @@
 #include "stereo-link.h"
 #include "stringhelper.h"
 #include "widget-boolean.h"
+#include "widget-rotated-label.h"
 #include "widget-text-entry.h"
 #include "window-geometry.h"
 #include "window-levels.h"
@@ -241,7 +242,6 @@ static GtkWidget *create_routing_group_grid(
   GtkOrientation    orientation,
   GtkAlign          align,
   GtkWidget       **heading_label,
-  GtkWidget       **heading_box,
   GtkWidget       **grid_out
 ) {
   GtkWidget *grid = gtk_grid_new();
@@ -296,9 +296,6 @@ static GtkWidget *create_routing_group_grid(
     gtk_widget_set_valign(heading, align);
     gtk_box_append(GTK_BOX(label_vbox), heading);
 
-    if (heading_box)
-      *heading_box = label_vbox;
-
     gtk_box_append(GTK_BOX(hbox), label_vbox);
     gtk_box_append(GTK_BOX(hbox), overlay);
     container = hbox;
@@ -349,7 +346,7 @@ static void create_routing_grid(struct alsa_card *card) {
     card, "routing_hw_in_grid", "hardware-inputs", "Hardware Inputs",
     "Hardware Inputs are the physical inputs on the interface",
     1, PC_HW,
-    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_END, NULL, NULL,
+    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_END, NULL,
     &card->routing_hw_in_grid
   );
   GtkWidget *pcm_in_container = create_routing_group_grid(
@@ -357,7 +354,7 @@ static void create_routing_grid(struct alsa_card *card) {
     "PCM Outputs are the digital audio channels sent from the PC to "
     "the interface over USB, used for audio playback",
     1, PC_PCM,
-    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_END, NULL, NULL,
+    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_END, NULL,
     &card->routing_pcm_in_grid
   );
   GtkWidget *pcm_out_container = create_routing_group_grid(
@@ -365,14 +362,14 @@ static void create_routing_grid(struct alsa_card *card) {
     "PCM Inputs are the digital audio channels sent from the interface "
     "to the PC over USB, use for audio recording",
     0, PC_PCM,
-    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_START, NULL, NULL,
+    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_START, NULL,
     &card->routing_pcm_out_grid
   );
   GtkWidget *hw_out_container = create_routing_group_grid(
     card, "routing_hw_out_grid", "hardware-outputs", "Hardware Outputs",
     "Hardware Outputs are the physical outputs on the interface",
     0, PC_HW,
-    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_START, NULL, NULL,
+    GTK_ORIENTATION_VERTICAL, GTK_ALIGN_START, NULL,
     &card->routing_hw_out_grid
   );
 
@@ -387,7 +384,7 @@ static void create_routing_grid(struct alsa_card *card) {
       "DSP Inputs are used to send audio to the DSP, which is used for "
       "features such as the input level meters, Air mode, and Autogain",
       0, PC_DSP,
-      GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER, NULL, NULL,
+      GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER, NULL,
       &card->routing_dsp_in_grid
     );
     dsp_out_container = create_routing_group_grid(
@@ -395,7 +392,7 @@ static void create_routing_grid(struct alsa_card *card) {
       "DSP Outputs are used to send audio from the DSP after it has "
       "done its processing",
       1, PC_DSP,
-      GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER, NULL, NULL,
+      GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER, NULL,
       &card->routing_dsp_out_grid
     );
   }
@@ -405,7 +402,7 @@ static void create_routing_grid(struct alsa_card *card) {
       "Mixer Inputs are used to mix multiple audio channels together",
       0, PC_MIX,
       GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER,
-      &card->routing_mixer_in_heading, NULL, &card->routing_mixer_in_grid
+      &card->routing_mixer_in_heading, &card->routing_mixer_in_grid
     );
   mixer_out_container = create_routing_group_grid(
     card, "routing_mixer_out_grid", "mixer-outputs",
@@ -413,8 +410,7 @@ static void create_routing_grid(struct alsa_card *card) {
     "Mixer Outputs are used to send audio from the mixer",
     1, PC_MIX,
     GTK_ORIENTATION_HORIZONTAL, GTK_ALIGN_CENTER,
-    &card->routing_mixer_out_heading, &card->routing_mixer_out_heading_box,
-    &card->routing_mixer_out_grid
+    &card->routing_mixer_out_heading, &card->routing_mixer_out_grid
   );
 
   int left_col_num = 0;
@@ -452,15 +448,42 @@ static void create_routing_grid(struct alsa_card *card) {
   gtk_grid_attach(routing_grid, card->routing_snk_label, right_col_num, 0, 1, 1);
 }
 
+// None of what can be done to a port shows on the port itself, unlike
+// the group headings with their menu arrow, so every port says so
+#define PORT_MENU_HINT \
+  "Drag to connect\n" \
+  "Left-click to remove connections\n" \
+  "Right-click for options"
+
+// Add the hint to whatever the label update left in the tooltip, and give
+// the socket the same text so that both halves of the port read the same
+static void set_port_menu_tooltip(GtkWidget *label, GtkWidget *socket) {
+  const char *current = gtk_widget_get_tooltip_text(label);
+
+  // the label update paths that leave the tooltip alone would otherwise
+  // add the hint again on every update
+  if (current && g_str_has_suffix(current, PORT_MENU_HINT)) {
+    if (socket)
+      gtk_widget_set_tooltip_text(socket, current);
+    return;
+  }
+
+  char *tooltip = current
+    ? g_strdup_printf("%s\n\n%s", current, PORT_MENU_HINT)
+    : g_strdup(PORT_MENU_HINT);
+
+  gtk_widget_set_tooltip_text(label, tooltip);
+  if (socket)
+    gtk_widget_set_tooltip_text(socket, tooltip);
+
+  g_free(tooltip);
+}
+
 static GtkWidget *make_socket_widget(void) {
   GtkWidget *w = gtk_picture_new_for_resource(
     "/vu/b4/alsa-scarlett-gui/icons/socket.svg"
   );
-  // the port menu has no visible affordance of its own, so the socket
-  // says that it is there
-  gtk_widget_set_tooltip_text(
-    w, "Right-click for options: stereo link, rename, hide"
-  );
+  gtk_widget_set_tooltip_text(w, PORT_MENU_HINT);
   gtk_widget_set_align(w, GTK_ALIGN_CENTER, GTK_ALIGN_CENTER);
   gtk_picture_set_can_shrink(GTK_PICTURE(w), FALSE);
   gtk_widget_set_margin(w, 2);
@@ -500,20 +523,74 @@ static GtkOrientation get_socket_orientation(int port_category) {
     : GTK_ORIENTATION_VERTICAL;
 }
 
+// Mixer outputs are labelled by letter unless they have a name of their
+// own, from the device or from the user, which is the name the mixer
+// window shows
+static int src_is_named(struct routing_src *src) {
+  if (!src || !src->display_name)
+    return 0;
+
+  char *generic = get_src_generic_name(src);
+  int named = strcmp(src->display_name, generic) != 0;
+
+  g_free(generic);
+
+  return named;
+}
+
+// A linked pair can be named as a pair, which is stored separately from
+// the names of the two channels
+static int src_pair_is_named(struct routing_src *src) {
+  struct alsa_elem *elem = get_src_pair_name_elem(src);
+
+  if (!elem)
+    return 0;
+
+  size_t size;
+  const void *bytes = alsa_get_elem_bytes(elem, &size);
+
+  return bytes && size && strnlen(bytes, size) > 0;
+}
+
+int mix_src_is_named(struct routing_src *src) {
+  if (src->port_category != PC_MIX)
+    return 0;
+
+  if (!is_src_linked(src))
+    return src_is_named(src);
+
+  return src_pair_is_named(src) ||
+         src_is_named(src) ||
+         src_is_named(get_src_partner(src));
+}
+
 // Get stereo-aware base name for a source
 // Returns newly allocated string that must be freed
+char *get_src_letter_name(struct routing_src *src) {
+  if (is_src_linked(src) && is_src_left_channel(src))
+    return g_strdup_printf(
+      "%c\xe2\x80\x93%c", src->port_num + 'A', src->port_num + 'B'
+    );
+
+  return g_strdup_printf("%c", src->port_num + 'A');
+}
+
 char *get_src_stereo_aware_name(struct routing_src *src) {
   if (is_src_linked(src) && is_src_left_channel(src)) {
     if (src->port_category == PC_MIX)
-      return g_strdup_printf(
-        "%c\xe2\x80\x93%c", src->port_num + 'A', src->port_num + 'B'
-      );
+      return mix_src_is_named(src)
+        ? get_src_pair_display_name(src)
+        : get_src_letter_name(src);
     if (src->port_category == PC_DSP)
       return g_strdup_printf(
         "%d\xe2\x80\x93%d", src->lr_num, src->lr_num + 1
       );
     return get_src_pair_display_name(src);
   }
+
+  if (mix_src_is_named(src))
+    return g_strdup(src->display_name);
+
   return get_src_display_name_formatted(src);
 }
 
@@ -536,6 +613,7 @@ char *get_snk_stereo_aware_name(struct routing_snk *snk) {
 // Label width for mono/stereo display
 #define LABEL_WIDTH_MONO   3
 #define LABEL_WIDTH_STEREO 4
+#define LABEL_WIDTH_NAMED  8
 
 // Helper to check if a source should be visible in routing grid
 static int is_src_visible(struct routing_src *r_src) {
@@ -605,6 +683,10 @@ void cleanup_routing_widgets(struct alsa_card *card) {
         g_object_unref(r_src->label_widget);
         r_src->label_widget = NULL;
       }
+      if (r_src->rotated_label_widget) {
+        g_object_unref(r_src->rotated_label_widget);
+        r_src->rotated_label_widget = NULL;
+      }
       if (r_src->talkback_widget) {
         g_object_unref(r_src->talkback_widget);
         r_src->talkback_widget = NULL;
@@ -631,6 +713,86 @@ void cleanup_routing_widgets(struct alsa_card *card) {
   }
 }
 
+// The label a source should be showing under its socket: a name goes in
+// the label drawn at an angle, while the lettering fits as it is, and is
+// already on the talkback button when there is one
+static GtkWidget *get_src_label_to_show(struct routing_src *r_src) {
+  if (mix_src_is_named(r_src))
+    return r_src->rotated_label_widget;
+
+  if (r_src->talkback_widget)
+    return NULL;
+
+  return r_src->label_widget;
+}
+
+// Natural width of a column of the source grid: the widest of the
+// socket, the talkback button under it, and the label under that
+static int src_column_width(struct routing_src *r_src) {
+  int width = 0;
+
+  GtkWidget *widgets[] = {
+    r_src->widget, r_src->talkback_widget, get_src_label_to_show(r_src)
+  };
+
+  for (int i = 0; i < G_N_ELEMENTS(widgets); i++) {
+    int natural;
+
+    if (!widgets[i])
+      continue;
+
+    gtk_widget_measure(
+      widgets[i], GTK_ORIENTATION_HORIZONTAL, -1,
+      NULL, &natural, NULL, NULL
+    );
+
+    if (natural > width)
+      width = natural;
+  }
+
+  return width;
+}
+
+// A rotated label reaches back past its own column, towards the start
+// of the group. The columns before it provide that room; the group
+// grows only by what the furthest-reaching name still needs beyond
+// them.
+static void update_src_grid_overhang(
+  struct alsa_card *card,
+  int               port_category
+) {
+  GtkWidget *grid = get_src_grid(card, port_category);
+
+  if (!grid)
+    return;
+
+  int spacing = gtk_grid_get_column_spacing(GTK_GRID(grid));
+  int overhang = 0;
+  int x = 0;
+
+  for (int i = 1; i < card->routing_srcs->len; i++) {
+    struct routing_src *r_src = &g_array_index(
+      card->routing_srcs, struct routing_src, i
+    );
+
+    if (r_src->port_category != port_category || !is_src_visible(r_src))
+      continue;
+
+    if (r_src->rotated_label_widget && mix_src_is_named(r_src)) {
+      int past_start =
+        rotated_label_get_overhang(r_src->rotated_label_widget) - x;
+
+      if (past_start > overhang)
+        overhang = past_start;
+    }
+
+    x += src_column_width(r_src) + spacing;
+  }
+
+  // 2px of the margin is the padding the highlight needs
+  gtk_widget_set_margin_start(grid, 2 + overhang);
+}
+
 // Arrange source widgets in their grid.
 // Removes all widgets and re-attaches only visible ones at consecutive positions.
 void arrange_src_grid(struct alsa_card *card, int port_category) {
@@ -652,24 +814,44 @@ void arrange_src_grid(struct alsa_card *card, int port_category) {
     // Unparent all widgets
     unparent_from_grid(grid, r_src->widget);
     unparent_from_grid(grid, r_src->label_widget);
+    unparent_from_grid(grid, r_src->rotated_label_widget);
     unparent_from_grid(grid, r_src->talkback_widget);
 
     if (!is_src_visible(r_src))
       continue;
 
     if (is_horiz) {
-      // Horizontal: socket at row 0, talkback/label at row 1
+      // Horizontal: socket at row 0, talkback at row 1, label at row 2.
+      // A name goes in the label drawn at an angle; the lettering fits
+      // under the socket as it is, and is already on the talkback
+      // button when there is one.
       gtk_grid_attach(GTK_GRID(grid), r_src->widget, pos, 0, 1, 1);
+
       if (r_src->talkback_widget)
         gtk_grid_attach(GTK_GRID(grid), r_src->talkback_widget, pos, 1, 1, 1);
-      else if (r_src->label_widget)
-        gtk_grid_attach(GTK_GRID(grid), r_src->label_widget, pos, 1, 1, 1);
+
+      GtkWidget *label = get_src_label_to_show(r_src);
+
+      if (label)
+        gtk_grid_attach(GTK_GRID(grid), label, pos, 2, 1, 1);
     } else {
       // Vertical: label at col 0, socket at col 1
       gtk_grid_attach(GTK_GRID(grid), r_src->label_widget, 0, pos, 1, 1);
       gtk_grid_attach(GTK_GRID(grid), r_src->widget, 1, pos, 1, 1);
     }
     pos++;
+  }
+
+  update_src_grid_overhang(card, port_category);
+
+  // the labels drawn at an angle are painted by the group's overlay, so
+  // attaching or removing one leaves that to redraw
+  GtkWidget *overlay = gtk_widget_get_parent(grid);
+  if (overlay) {
+    GtkWidget *painter = gtk_overlay_get_child(GTK_OVERLAY(overlay));
+
+    if (painter)
+      gtk_widget_queue_draw(painter);
   }
 
   if (card->routing_lines)
@@ -794,10 +976,24 @@ static void draw_highlight_rect(
 }
 
 // Get combined bounds of socket + label (or socket + talkback) relative to a widget
-static int get_src_bounds_relative(
+// The label a source is showing: a mixer output swaps between the plain
+// one and the one drawn at an angle, depending on whether it is named
+static GtkWidget *get_src_label_in_use(struct routing_src *src) {
+  if (src->rotated_label_widget &&
+      gtk_widget_get_parent(src->rotated_label_widget))
+    return src->rotated_label_widget;
+
+  if (src->label_widget && gtk_widget_get_parent(src->label_widget))
+    return src->label_widget;
+
+  return NULL;
+}
+
+static int get_src_bounds_ex(
   struct routing_src *src,
   GtkWidget          *relative_to,
-  graphene_rect_t    *bounds
+  graphene_rect_t    *bounds,
+  int                 include_rotated
 ) {
   if (!src->widget2)
     return 0;
@@ -814,6 +1010,14 @@ static int get_src_bounds_relative(
       return 0;
 
     graphene_rect_union(&socket_bounds, &talkback_bounds, bounds);
+
+    // the name sits below the talkback button when there is one
+    GtkWidget *label = get_src_label_in_use(src);
+    graphene_rect_t label_bounds;
+
+    if (label && (include_rotated || !is_rotated_label(label)) &&
+        gtk_widget_compute_bounds(label, relative_to, &label_bounds))
+      graphene_rect_union(bounds, &label_bounds, bounds);
 
     // Extend to cell top: compute how far socket is from grid top
     GtkWidget *grid = gtk_widget_get_parent(src->widget2);
@@ -835,16 +1039,33 @@ static int get_src_bounds_relative(
     return 1;
   }
 
-  // Normal case: socket + label
-  if (!src->label_widget)
-    return 0;
+  // Normal case: socket + whichever label is in use
+  GtkWidget *label = get_src_label_in_use(src);
+
+  // a rotated label is highlighted along with its text, not as the
+  // narrow column it reserves
+  if (label && !include_rotated && is_rotated_label(label))
+    label = NULL;
+
+  if (!label) {
+    *bounds = socket_bounds;
+    return 1;
+  }
 
   graphene_rect_t label_bounds;
-  if (!gtk_widget_compute_bounds(src->label_widget, relative_to, &label_bounds))
+  if (!gtk_widget_compute_bounds(label, relative_to, &label_bounds))
     return 0;
 
   graphene_rect_union(&socket_bounds, &label_bounds, bounds);
   return 1;
+}
+
+static int get_src_bounds_relative(
+  struct routing_src *src,
+  GtkWidget          *relative_to,
+  graphene_rect_t    *bounds
+) {
+  return get_src_bounds_ex(src, relative_to, bounds, 1);
 }
 
 static int get_snk_bounds_relative(
@@ -865,8 +1086,48 @@ static int get_snk_bounds_relative(
   return 1;
 }
 
+// Is the point on the source: on its socket, its label, or on the text
+// of a label drawn at an angle, which lies outside the widget's own area
+static int src_contains_point(
+  struct routing_src     *src,
+  GtkWidget              *relative_to,
+  const graphene_point_t *point
+) {
+  graphene_rect_t bounds;
+
+  if (get_src_bounds_ex(src, relative_to, &bounds, 0) &&
+      graphene_rect_contains_point(&bounds, point))
+    return 1;
+
+  GtkWidget *label = get_src_label_in_use(src);
+
+  return label && is_rotated_label(label) &&
+         rotated_label_contains_point(
+           label, relative_to, point->x, point->y, 2.0
+         );
+}
+
 // Draw the highlight for a source, and its stereo partner, if it belongs
 // to this group's overlay
+// A rotated label is highlighted by its text, turned with it, rather
+// than by the narrow column the widget reserves
+static void draw_rotated_label_highlight(
+  cairo_t            *cr,
+  GtkWidget          *highlight_widget,
+  struct routing_src *src
+) {
+  GtkWidget *label = get_src_label_in_use(src);
+
+  if (!label || !is_rotated_label(label))
+    return;
+
+  rotated_label_append_outline(label, highlight_widget, cr, 2.0);
+
+  // the same #801010 as the rectangular highlights
+  cairo_set_source_rgb(cr, 0.5, 0.063, 0.063);
+  cairo_fill(cr);
+}
+
 static void draw_src_highlight(
   cairo_t            *cr,
   GtkWidget          *highlight_widget,
@@ -878,14 +1139,16 @@ static void draw_src_highlight(
     return;
 
   graphene_rect_t bounds;
-  if (get_src_bounds_relative(src, highlight_widget, &bounds))
+  if (get_src_bounds_ex(src, highlight_widget, &bounds, 0))
     draw_highlight_rect(cr, &bounds);
+
+  draw_rotated_label_highlight(cr, highlight_widget, src);
 
   if (!is_src_linked(src))
     return;
 
   struct routing_src *partner = get_src_partner(src);
-  if (partner && get_src_bounds_relative(partner, highlight_widget, &bounds))
+  if (partner && get_src_bounds_ex(partner, highlight_widget, &bounds, 0))
     draw_highlight_rect(cr, &bounds);
 }
 
@@ -966,24 +1229,41 @@ static int drop_off_ids(int *ids, int count) {
   return out;
 }
 
+// A rotated label reaches beyond its own column, so it is drawn here, on
+// the widget that spans the whole group, and on top of the highlights so
+// that a highlight sits behind its name
+static void draw_rotated_labels(
+  cairo_t          *cr,
+  GtkWidget        *highlight_widget,
+  GtkWidget        *overlay,
+  struct alsa_card *card
+) {
+  for (int i = 1; i < card->routing_srcs->len; i++) {
+    struct routing_src *src = &g_array_index(
+      card->routing_srcs, struct routing_src, i
+    );
+
+    GtkWidget *label = src->rotated_label_widget;
+
+    if (!label || !gtk_widget_get_parent(label))
+      continue;
+
+    if (gtk_widget_get_ancestor(label, GTK_TYPE_OVERLAY) != overlay)
+      continue;
+
+    rotated_label_draw_on(label, highlight_widget, cr);
+  }
+}
+
 // Draw highlights for the hovered source/sink, and everything connected to
 // it: the sinks fed by a source, plus the source and all other sinks sharing
 // it when a sink is hovered
-static void draw_group_highlights(
-  GtkDrawingArea *drawing_area,
-  cairo_t        *cr,
-  int             width,
-  int             height,
-  void           *user_data
+static void draw_hover_highlights(
+  cairo_t          *cr,
+  GtkWidget        *highlight_widget,
+  GtkWidget        *overlay,
+  struct alsa_card *card
 ) {
-  struct alsa_card *card = user_data;
-  GtkWidget *highlight_widget = GTK_WIDGET(drawing_area);
-
-  // Get the grid (sibling in the overlay)
-  GtkWidget *overlay = gtk_widget_get_parent(highlight_widget);
-  if (!overlay)
-    return;
-
   // The connection is identified by the source id(s) involved
   int ids[2];
   int id_count = 0;
@@ -1000,6 +1280,7 @@ static void draw_group_highlights(
 
   // Unconnected sinks (source "Off") have nothing on the other end
   id_count = drop_off_ids(ids, id_count);
+
   if (!id_count)
     return;
 
@@ -1042,6 +1323,27 @@ static void draw_group_highlights(
     if (ids_intersect(ids, id_count, snk_src_ids, snk_src_id_count))
       draw_snk_highlight(cr, highlight_widget, overlay, snk);
   }
+}
+
+// The group's own drawing: the hover highlights, and the labels that are
+// drawn on top of them
+static void draw_group_highlights(
+  GtkDrawingArea *drawing_area,
+  cairo_t        *cr,
+  int             width,
+  int             height,
+  void           *user_data
+) {
+  struct alsa_card *card = user_data;
+  GtkWidget *highlight_widget = GTK_WIDGET(drawing_area);
+
+  // Get the grid (sibling in the overlay)
+  GtkWidget *overlay = gtk_widget_get_parent(highlight_widget);
+  if (!overlay)
+    return;
+
+  draw_hover_highlights(cr, highlight_widget, overlay, card);
+  draw_rotated_labels(cr, highlight_widget, overlay, card);
 }
 
 // Queue redraw on all group highlight areas
@@ -1326,11 +1628,7 @@ static void routing_overlay_motion(
     if (is_src_linked(src) && !is_src_left_channel(src))
       continue;
 
-    graphene_rect_t bounds;
-    if (!get_src_bounds_relative(src, overlay, &bounds))
-      continue;
-
-    if (graphene_rect_contains_point(&bounds, &point)) {
+    if (src_contains_point(src, overlay, &point)) {
       new_hovered_src = src;
       break;
     }
@@ -1412,11 +1710,7 @@ static struct routing_src *find_src_at_point(
     if (is_src_linked(src) && !is_src_left_channel(src))
       continue;
 
-    graphene_rect_t bounds;
-    if (!get_src_bounds_relative(src, relative_to, &bounds))
-      continue;
-
-    if (graphene_rect_contains_point(&bounds, &point))
+    if (src_contains_point(src, relative_to, &point))
       return src;
   }
 
@@ -1486,10 +1780,9 @@ static void hide_snk_clicked(GtkButton *button, gpointer user_data) {
 
 // The name element the routing window's label for a port comes from: the
 // pair's when it is linked, the channel's own otherwise.
-// Mixer and DSP ports are labelled by position here, so their names are
-// only editable where they are shown.
 static struct alsa_elem *get_src_name_elem(struct routing_src *src) {
-  if (src->port_category == PC_MIX || src->port_category == PC_DSP)
+  // DSP ports are labelled by number here, so a name would not show
+  if (src->port_category == PC_DSP)
     return NULL;
 
   if (is_src_linked(src)) {
@@ -1761,6 +2054,38 @@ static void routing_overlay_right_click(
   GtkWidget *popover = routing_menu_popover_new(widget, x, y);
   gtk_popover_set_child(GTK_POPOVER(popover), stack);
   gtk_popover_popup(GTK_POPOVER(popover));
+}
+
+// The text of a label drawn at an angle is outside the widget that
+// carries the tooltip, so nothing would show it without this
+static gboolean routing_overlay_query_tooltip(
+  GtkWidget  *widget,
+  int         x,
+  int         y,
+  gboolean    keyboard,
+  GtkTooltip *tooltip,
+  gpointer    user_data
+) {
+  struct alsa_card *card = user_data;
+
+  if (keyboard)
+    return FALSE;
+
+  struct routing_src *r_src = find_src_at_point(card, widget, x, y);
+  if (!r_src)
+    return FALSE;
+
+  GtkWidget *label = get_src_label_in_use(r_src);
+  if (!label || !is_rotated_label(label))
+    return FALSE;
+
+  const char *text = gtk_widget_get_tooltip_text(label);
+  if (!text)
+    return FALSE;
+
+  gtk_tooltip_set_text(tooltip, text);
+
+  return TRUE;
 }
 
 // Unified click handler using hit-testing
@@ -2180,12 +2505,21 @@ static GtkWidget *make_routing_label(
   return label;
 }
 
-// Set up a source label widget
+// Set up a source label widget. A mixer output gets a second one drawn
+// at an angle, for when its name is too long to sit under its socket.
 static void setup_src_label(struct routing_src *r_src, const char *name) {
   r_src->label_widget = make_routing_label(
     name, "routing_src", r_src,
     r_src->port_category, is_src_linked(r_src), 1.0
   );
+
+  if (r_src->port_category == PC_MIX) {
+    r_src->rotated_label_widget = g_object_ref(rotated_label_new());
+    gtk_widget_add_css_class(r_src->rotated_label_widget, "route-label");
+    rotated_label_set_markup(r_src->rotated_label_widget, name);
+  }
+
+  set_port_menu_tooltip(r_src->label_widget, r_src->widget2);
 
   // same name as the socket, so the documented region covers both
   widget_doc_register_named(r_src->label_widget, r_src->name);
@@ -2224,6 +2558,8 @@ static void setup_snk_label(struct routing_snk *r_snk, const char *name) {
     r_snk->elem->port_category, is_snk_linked(r_snk), 0.0
   );
 
+  set_port_menu_tooltip(r_snk->label_widget, r_snk->socket_widget);
+
   // same element as the socket, so the documented region covers both
   widget_doc_register(r_snk->label_widget, r_snk->elem);
 }
@@ -2250,12 +2586,19 @@ static GtkWidget *make_talkback_mix_widget(
   // Register talkback sync callback for stereo linking
   stereo_link_register_talkback_callback(r_src);
 
-  // Use stereo-aware name (e.g., "A" or "A–B" when linked)
-  char *display_name = get_src_stereo_aware_name(r_src);
+  // The name goes on the label below; the button stays lettered so that
+  // it keeps the width of its socket
+  char *display_name = get_src_letter_name(r_src);
   GtkWidget *button = make_boolean_alsa_elem(
     talkback_elem, display_name, display_name
   );
   g_free(display_name);
+
+  gtk_widget_set_tooltip_text(
+    button,
+    "Talkback: with this enabled, the level of the talkback mic in this "
+    "mix is raised while the Talkback control is on."
+  );
 
   /* The button takes the label's place under the socket and carries the
    * mix's name, so it is part of the mix's region as well as being the
@@ -2273,6 +2616,23 @@ static void set_availability_label(
   int         available,
   const char *tooltip
 ) {
+  // a rotated label takes markup rather than text, and has no separate
+  // "use markup" state to reset
+  if (is_rotated_label(label)) {
+    char *escaped = g_markup_escape_text(base_name, -1);
+    char *markup = available
+      ? g_strdup(escaped)
+      : g_strdup_printf("<span color=\"#808080\"><s>%s</s></span>", escaped);
+
+    rotated_label_set_markup(label, markup);
+    gtk_widget_set_tooltip_text(label, available ? NULL : tooltip);
+
+    g_free(markup);
+    g_free(escaped);
+
+    return;
+  }
+
   if (!available) {
     char *markup = g_strdup_printf(
       "<span color=\"#808080\"><s>%s</s></span>", base_name
@@ -2328,7 +2688,7 @@ void update_snk_effective_source(struct routing_snk *r_snk) {
 }
 
 // Update hardware output label to show monitor group status
-void update_hw_output_label(struct routing_snk *r_snk) {
+static void update_hw_output_label_text(struct routing_snk *r_snk) {
   struct alsa_elem *elem = r_snk->elem;
   struct alsa_card *card = elem->card;
 
@@ -2411,8 +2771,16 @@ void update_hw_output_label(struct routing_snk *r_snk) {
   g_free(base_name);
 }
 
+void update_hw_output_label(struct routing_snk *r_snk) {
+  if (!r_snk->label_widget)
+    return;
+
+  update_hw_output_label_text(r_snk);
+  set_port_menu_tooltip(r_snk->label_widget, r_snk->socket_widget);
+}
+
 // Update routing source label (stereo-aware name with availability)
-void update_routing_src_label(struct routing_src *r_src) {
+static void update_routing_src_label_text(struct routing_src *r_src) {
   if (!r_src->label_widget)
     return;
 
@@ -2436,20 +2804,49 @@ void update_routing_src_label(struct routing_src *r_src) {
 
   set_availability_label(r_src->label_widget, name, available, tooltip);
 
+  if (r_src->rotated_label_widget)
+    set_availability_label(
+      r_src->rotated_label_widget, name, available, tooltip
+    );
+
   // For horizontal grids, set width based on mono/stereo
-  if (is_horiz_port_category(r_src->port_category)) {
+  if (is_horiz_port_category(r_src->port_category) &&
+      GTK_IS_LABEL(r_src->label_widget)) {
     int width = is_src_linked(r_src) ? LABEL_WIDTH_STEREO : LABEL_WIDTH_MONO;
+
     gtk_label_set_width_chars(GTK_LABEL(r_src->label_widget), width);
   }
 
   // Preserve tooltip for ellipsised labels (vertical orientation)
   if (available &&
+      GTK_IS_LABEL(r_src->label_widget) &&
       gtk_label_get_ellipsize(
         GTK_LABEL(r_src->label_widget)
       ) != PANGO_ELLIPSIZE_NONE)
     gtk_widget_set_tooltip_text(r_src->label_widget, name);
 
   g_free(name);
+}
+
+void update_routing_src_label(struct routing_src *r_src) {
+  if (!r_src->label_widget)
+    return;
+
+  update_routing_src_label_text(r_src);
+  set_port_menu_tooltip(r_src->label_widget, r_src->widget2);
+
+  if (r_src->rotated_label_widget)
+    set_port_menu_tooltip(r_src->rotated_label_widget, NULL);
+
+  // naming a mixer output swaps the label under it for the one drawn at
+  // an angle, and unnaming it swaps back
+  if (r_src->rotated_label_widget &&
+      get_src_label_in_use(r_src) != get_src_label_to_show(r_src))
+    arrange_src_grid(r_src->card, r_src->port_category);
+
+  // a renamed label reaches a different distance past its column
+  else if (r_src->rotated_label_widget)
+    update_src_grid_overhang(r_src->card, r_src->port_category);
 }
 
 // Update mixer heading labels for availability at high sample rates
@@ -2592,6 +2989,7 @@ static void add_routing_widgets(
     r_src->widget = NULL;
     r_src->widget2 = NULL;
     r_src->label_widget = NULL;
+    r_src->rotated_label_widget = NULL;
     r_src->talkback_widget = NULL;
   }
   for (int i = 0; i < r_snks->len; i++) {
@@ -2638,21 +3036,6 @@ static void add_routing_widgets(
   arrange_snk_grid(card, PC_MIX);
   arrange_snk_grid(card, PC_HW);
   arrange_snk_grid(card, PC_PCM);
-
-  // Add talkback label after mixer outputs heading
-  if (card->has_talkback) {
-    GtkWidget *l_talkback = gtk_label_new("Talkback");
-    gtk_widget_set_tooltip_text(
-      l_talkback,
-      "Mixer Outputs with Talkback enabled will have the level of "
-      "Mixer Input 25 internally raised and lowered when the "
-      "Talkback control is turned On and Off."
-    );
-    gtk_box_append(
-      GTK_BOX(card->routing_mixer_out_heading_box), l_talkback
-    );
-    card->routing_talkback_label = l_talkback;
-  }
 
   card->routing_lines = gtk_drawing_area_new();
   gtk_widget_set_can_target(card->routing_lines, FALSE);
@@ -2771,6 +3154,14 @@ GtkWidget *create_routing_controls(struct alsa_card *card) {
     );
 
   add_drop_controller_motion(card, routing_overlay);
+
+  // The text of a label drawn at an angle lies outside the widget that
+  // holds its tooltip, so the overlay answers for it
+  gtk_widget_set_has_tooltip(routing_overlay, TRUE);
+  g_signal_connect(
+    routing_overlay, "query-tooltip",
+    G_CALLBACK(routing_overlay_query_tooltip), card
+  );
 
   // Add hover detection via motion controller on overlay
   GtkEventController *motion = gtk_event_controller_motion_new();

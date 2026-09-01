@@ -9,6 +9,15 @@
 
 GtkWidget *create_routing_controls(struct alsa_card *card);
 
+// Does this mixer output have a name of its own, rather than being
+// labelled by letter?
+int mix_src_is_named(struct routing_src *src);
+
+// Mixer outputs lettered as the mixer window numbers them: "A", or
+// "A\xe2\x80\x93B" when linked.
+// Returns a newly allocated string that must be freed.
+char *get_src_letter_name(struct routing_src *src);
+
 // Stereo-aware display names as shown in the routing window.
 // Returns a newly allocated string that must be freed.
 char *get_src_stereo_aware_name(struct routing_src *src);

@@ -420,19 +420,6 @@ static void pair_name_changed(struct alsa_elem *elem, void *private) {
   }
 }
 
-// Get the stereo-aware talkback label for a mixer output source
-// Returns newly allocated string that must be freed
-static char *get_talkback_stereo_aware_name(struct routing_src *src) {
-  if (is_src_linked(src) && is_src_left_channel(src)) {
-    // Linked: show "A–B" format
-    return g_strdup_printf(
-      "%c\xe2\x80\x93%c", src->port_num + 'A', src->port_num + 'B'
-    );
-  }
-  // Not linked: show single letter (e.g., "A")
-  return g_strdup_printf("%c", src->port_num + 'A');
-}
-
 // Update talkback button labels for stereo linking
 static void update_talkback_labels(struct alsa_card *card) {
   if (!card || !card->has_talkback || !card->routing_srcs)
@@ -453,7 +440,7 @@ static void update_talkback_labels(struct alsa_card *card) {
     if (!r_src->talkback_widget)
       continue;
 
-    char *name = get_talkback_stereo_aware_name(r_src);
+    char *name = get_src_letter_name(r_src);
     boolean_widget_update_labels(r_src->talkback_widget, name, name);
     g_free(name);
   }

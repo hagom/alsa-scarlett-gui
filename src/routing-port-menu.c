@@ -41,12 +41,13 @@ static const struct port_group *find_port_group(
 
 // Mixer and DSP ports are labelled with just a letter or number, which
 // only makes sense next to the group heading
-static int name_needs_group_title(int port_category) {
-  return port_category == PC_MIX || port_category == PC_DSP;
-}
-
-static char *qualify_name(int is_src, int port_category, char *name) {
-  if (!name_needs_group_title(port_category))
+static char *qualify_name(
+  int   is_src,
+  int   port_category,
+  int   is_named,
+  char *name
+) {
+  if (is_named || (port_category != PC_MIX && port_category != PC_DSP))
     return name;
 
   const struct port_group *group = find_port_group(is_src, port_category);
@@ -61,13 +62,14 @@ static char *qualify_name(int is_src, int port_category, char *name) {
 
 char *get_src_qualified_name(struct routing_src *src) {
   return qualify_name(
-    1, src->port_category, get_src_stereo_aware_name(src)
+    1, src->port_category, mix_src_is_named(src),
+    get_src_stereo_aware_name(src)
   );
 }
 
 char *get_snk_qualified_name(struct routing_snk *snk) {
   return qualify_name(
-    0, snk->elem->port_category, get_snk_stereo_aware_name(snk)
+    0, snk->elem->port_category, 0, get_snk_stereo_aware_name(snk)
   );
 }
 

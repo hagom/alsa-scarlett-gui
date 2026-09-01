@@ -206,13 +206,10 @@ void update_routing_section_visibility(struct alsa_card *card) {
     card->routing_mixer_in_grid, !all_sinks_disabled(card, PC_MIX)
   );
 
-  // Mixer Outputs (sources), and the Talkback label beside the heading
-  int has_mixer_outs = !all_sources_disabled(card, PC_MIX);
-
-  set_group_ports_visible(card->routing_mixer_out_grid, has_mixer_outs);
-
-  if (card->routing_talkback_label)
-    gtk_widget_set_visible(card->routing_talkback_label, has_mixer_outs);
+  // Mixer Outputs (sources)
+  set_group_ports_visible(
+    card->routing_mixer_out_grid, !all_sources_disabled(card, PC_MIX)
+  );
 
   // Update the Sources and Sinks label arrows
   update_sources_label(card);

@@ -117,6 +117,10 @@ struct routing_src {
   // the label widget (for updating text, e.g. PCM availability)
   GtkWidget *label_widget;
 
+  // mixer outputs also get a label drawn at an angle, used in place of
+  // the label above when the port has a name too long to sit under it
+  GtkWidget *rotated_label_widget;
+
   // optional/simulated element for custom name
   struct alsa_elem *custom_name_elem;
 
@@ -349,8 +353,6 @@ struct alsa_card {
   GtkWidget          *routing_mixer_out_grid;
   GtkWidget          *routing_mixer_in_heading;
   GtkWidget          *routing_mixer_out_heading;
-  GtkWidget          *routing_mixer_out_heading_box;
-  GtkWidget          *routing_talkback_label;
   GtkWidget          *routing_src_label;
   GtkWidget          *routing_snk_label;
   int                 has_speaker_switching;
