@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2022-2025 Geoffrey D. Bennett <g@b4.vu>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <locale.h>
+#include "i18n.h"
 #include "alsa.h"
 #include "alsa-sim.h"
 #include "welcome.h"
@@ -70,6 +72,15 @@ static void open_cb(
 }
 
 int main(int argc, char **argv) {
+  setlocale(LC_ALL, "");
+  bindtextdomain(GETTEXT_PACKAGE, LOCALEDIR);
+  if (g_file_test("locale", G_FILE_TEST_IS_DIR))
+    bindtextdomain(GETTEXT_PACKAGE, "locale");
+  else if (g_file_test("../locale", G_FILE_TEST_IS_DIR))
+    bindtextdomain(GETTEXT_PACKAGE, "../locale");
+  bind_textdomain_codeset(GETTEXT_PACKAGE, "UTF-8");
+  textdomain(GETTEXT_PACKAGE);
+
   app = gtk_application_new(
     "vu.b4.alsa-scarlett-gui", G_APPLICATION_HANDLES_OPEN
   );
